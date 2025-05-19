@@ -121,8 +121,8 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
 
     try {
       // Create a unique file path
-      const fileExt = selectedFile.name.split('.').pop();
-      const filePath = `${uuidv4()}.${fileExt}`;
+      const uploadFileExt = selectedFile.name.split('.').pop();
+      const filePath = `${uuidv4()}.${uploadFileExt}`;
 
       // Simulate upload progress since we can't use onUploadProgress
       const progressInterval = setInterval(() => {
@@ -173,8 +173,9 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
       const result = await response.json();
       
       // Provide format-specific success messages
-      const fileExt = selectedFile.name.split('.').pop()?.toLowerCase();
-      if (fileExt === 'm4a' || fileExt === 'mp4') {
+      // Using the file extension we already obtained for validation
+      const fileExtension = selectedFile.name.split('.').pop()?.toLowerCase();
+      if (fileExtension === 'm4a' || fileExtension === 'mp4') {
         toast.success('File uploaded. M4A/MP4 processing may take longer than usual.');
       } else {
         toast.success('File uploaded and transcription started');
