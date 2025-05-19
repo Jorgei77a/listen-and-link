@@ -1,64 +1,64 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import FileUpload from "@/components/FileUpload";
 import TranscriptionDisplay from "@/components/TranscriptionDisplay";
 import Features from "@/components/Features";
 import { toast } from "sonner";
-
-// This is a placeholder function - once Supabase integration is added,
-// the actual transcription logic will be implemented using Supabase edge functions
-const transcribeAudio = async (file: File): Promise<string> => {
-  // This is a mock function - the real implementation will use Supabase
-  return new Promise((resolve) => {
-    // Simulate processing delay
-    setTimeout(() => {
-      const mockTranscript = `This is a placeholder transcription for the file "${file.name}".
-      
-In the actual implementation, this audio would be processed through OpenAI's Whisper API via a Supabase edge function.
-
-For files over 22MB, the system will:
-1. Split the file into smaller chunks
-2. Process each chunk separately
-3. Combine the results into a single transcript
-
-To implement the actual functionality, please connect this project to Supabase.`;
-      
-      resolve(mockTranscript);
-    }, 3000); // 3 second delay to simulate processing
-  });
-};
+import { supabase } from "@/integrations/supabase/client";
 
 const Index = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [transcript, setTranscript] = useState<string | null>(null);
   const [currentFileName, setCurrentFileName] = useState<string>("");
+  const [currentTranscriptionId, setCurrentTranscriptionId] = useState<string | null>(null);
 
-  const handleFileUpload = async (file: File) => {
+  // Poll for transcription status if we have an ID
+  useEffect(() => {
+    if (!currentTranscriptionId) return;
+    
+    const checkTranscription = async () => {
+      const { data, error } = await supabase
+        .from('transcriptions')
+        .select('*')
+        .eq('id', currentTranscriptionId)
+        .single();
+      
+      if (error) {
+        console.error('Failed to fetch transcription:', error);
+        return;
+      }
+      
+      if (data) {
+        if (data.status === 'completed' && data.transcript) {
+          setTranscript(data.transcript);
+          setIsProcessing(false);
+          toast.success("Transcription complete!");
+        } else if (data.status === 'failed') {
+          setIsProcessing(false);
+          toast.error(`Transcription failed: ${data.error || 'Unknown error'}`);
+        }
+      }
+    };
+    
+    const intervalId = setInterval(checkTranscription, 3000);
+    return () => clearInterval(intervalId);
+  }, [currentTranscriptionId]);
+
+  const handleFileUpload = async (file: File, transcriptionId?: string) => {
     setIsProcessing(true);
     setCurrentFileName(file.name);
     
-    try {
-      // Show size-based messaging
-      if (file.size > 22 * 1024 * 1024) {
-        toast.info("Large file detected. It will be split into chunks for processing.");
-      }
-      
-      const result = await transcribeAudio(file);
-      setTranscript(result);
-      toast.success("Transcription complete!");
-    } catch (error) {
-      console.error("Transcription error:", error);
-      toast.error("Failed to transcribe audio. Please try again.");
-    } finally {
-      setIsProcessing(false);
+    if (transcriptionId) {
+      setCurrentTranscriptionId(transcriptionId);
     }
   };
 
   const handleReset = () => {
     setTranscript(null);
     setCurrentFileName("");
+    setCurrentTranscriptionId(null);
   };
 
   return (

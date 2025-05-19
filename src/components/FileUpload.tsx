@@ -5,9 +5,11 @@ import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { Upload } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { v4 as uuidv4 } from "uuid";
 
 interface FileUploadProps {
-  onFileUpload: (file: File) => void;
+  onFileUpload: (file: File, transcriptionId?: string) => void;
   isProcessing: boolean;
 }
 
@@ -15,6 +17,8 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploading, setUploading] = useState(false);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -56,11 +60,66 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     toast.success(`File "${file.name}" selected`);
   };
 
-  const handleSubmit = () => {
-    if (selectedFile) {
-      onFileUpload(selectedFile);
-    } else {
+  const handleSubmit = async () => {
+    if (!selectedFile) {
       toast.error("Please select a file first");
+      return;
+    }
+
+    setUploading(true);
+    setUploadProgress(0);
+
+    try {
+      // Create a unique file path
+      const fileExt = selectedFile.name.split('.').pop();
+      const filePath = `${uuidv4()}.${fileExt}`;
+
+      // Upload file to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('audio_files')
+        .upload(filePath, selectedFile, {
+          cacheControl: '3600',
+          upsert: false,
+          onUploadProgress: (progress) => {
+            const percent = Math.round((progress.loaded / progress.total) * 100);
+            setUploadProgress(percent);
+          }
+        });
+
+      if (uploadError) {
+        throw new Error(`Error uploading file: ${uploadError.message}`);
+      }
+
+      // Start the transcription process
+      const response = await fetch('https://btfhfujdrvvkdiobitsb.supabase.co/functions/v1/transcribe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabase.auth.getSession()}`
+        },
+        body: JSON.stringify({
+          filePath: filePath,
+          fileName: selectedFile.name,
+          fileSize: selectedFile.size
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`Transcription error: ${errorData.error || 'Unknown error'}`);
+      }
+
+      const result = await response.json();
+      toast.success('File uploaded and transcription started');
+      
+      // Pass the file and transcription ID to parent component
+      onFileUpload(selectedFile, result.id);
+      
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      toast.error(error.message || 'Upload failed');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -76,7 +135,7 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     <Card className="w-full max-w-2xl mx-auto p-6 shadow-lg">
       <div className="space-y-6">
         <div 
-          className={`file-drop-area ${dragActive ? 'active' : ''}`}
+          className={`file-drop-area border-2 border-dashed rounded-lg p-8 ${dragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'}`}
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}
           onDragOver={handleDrag}
@@ -97,7 +156,7 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
               type="button"
               onClick={() => inputRef.current?.click()}
               className="mt-4"
-              disabled={isProcessing}
+              disabled={isProcessing || uploading}
             >
               Select File
             </Button>
@@ -107,7 +166,7 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
               className="hidden"
               accept="audio/*"
               onChange={handleChange}
-              disabled={isProcessing}
+              disabled={isProcessing || uploading}
             />
           </div>
         </div>
@@ -135,15 +194,30 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
               </div>
               <Button 
                 onClick={handleSubmit} 
-                disabled={isProcessing}
+                disabled={isProcessing || uploading}
               >
-                {isProcessing ? "Processing..." : "Transcribe Now"}
+                {uploading ? "Uploading..." : "Transcribe Now"}
               </Button>
             </div>
           </div>
         )}
 
-        {isProcessing && (
+        {uploading && (
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span>Uploading</span>
+              <span>{uploadProgress}%</span>
+            </div>
+            <Progress 
+              value={uploadProgress} 
+            />
+            <p className="text-xs text-muted-foreground text-center">
+              Please wait while your file is being uploaded
+            </p>
+          </div>
+        )}
+
+        {isProcessing && !uploading && (
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
               <span>Processing</span>
@@ -154,7 +228,7 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
               className="animate-pulse-slow" 
             />
             <p className="text-xs text-muted-foreground text-center">
-              Large files may take several minutes to process
+              Processing transcription with OpenAI Whisper
             </p>
           </div>
         )}
