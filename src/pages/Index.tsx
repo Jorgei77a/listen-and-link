@@ -39,10 +39,11 @@ const Index = () => {
         } else if (data.status === 'failed') {
           setIsProcessing(false);
           toast.error(`Transcription failed: ${data.error || 'Unknown error'}`);
-        } else if (data.status === 'processing' && data.error) {
-          // Show progress messages to the user
-          toast.info(data.error, { id: 'processing-status', duration: 2000 });
         }
+        // We no longer need these progress toasts as we show progress in the UI
+        // else if (data.status === 'processing' && data.error) {
+        //   toast.info(data.error, { id: 'processing-status', duration: 2000 });
+        // }
       }
     };
     
@@ -73,16 +74,16 @@ const Index = () => {
     if (transcriptionId) {
       setCurrentTranscriptionId(transcriptionId);
       
-      // Show format-specific messages
-      const fileExt = file.name.split('.').pop()?.toLowerCase();
-      if (fileExt === 'm4a' || fileExt === 'mp4') {
-        setTimeout(() => {
-          toast.info("M4A/MP4 files require additional processing time. Please be patient.", { 
-            duration: 10000,
-            id: 'm4a-processing-notice'
-          });
-        }, 5000);
-      }
+      // Remove toast notifications since we now show progress in the UI
+      // const fileExt = file.name.split('.').pop()?.toLowerCase();
+      // if (fileExt === 'm4a' || fileExt === 'mp4') {
+      //   setTimeout(() => {
+      //     toast.info("M4A/MP4 files require additional processing time. Please be patient.", { 
+      //       duration: 10000,
+      //       id: 'm4a-processing-notice'
+      //     });
+      //   }, 5000);
+      // }
     }
   };
 

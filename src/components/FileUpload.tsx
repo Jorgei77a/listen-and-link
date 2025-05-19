@@ -1,4 +1,5 @@
-import { useState, useRef } from "react";
+
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -8,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { v4 as uuidv4 } from "uuid";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import ProcessingStages, { ProcessingStage } from "./ProcessingStages";
 import {
   Dialog,
   DialogContent,
@@ -30,6 +32,103 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
   const [uploading, setUploading] = useState(false);
   const [customTitle, setCustomTitle] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  
+  // New states for tracking processing stages
+  const [processingStage, setProcessingStage] = useState<ProcessingStage>("uploading");
+  const [processingProgress, setProcessingProgress] = useState({
+    uploading: 0,
+    converting: 0,
+    transcribing: 0
+  });
+  const [currentTranscriptionId, setCurrentTranscriptionId] = useState<string | null>(null);
+  const [processingError, setProcessingError] = useState<string | null>(null);
+  
+  // Poll for transcription status if we have an ID
+  useEffect(() => {
+    if (!currentTranscriptionId || !isProcessing) return;
+    
+    const checkTranscription = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('transcriptions')
+          .select('*')
+          .eq('id', currentTranscriptionId)
+          .single();
+        
+        if (error) {
+          console.error('Failed to fetch transcription:', error);
+          return;
+        }
+        
+        if (data) {
+          if (data.status === 'completed') {
+            setProcessingStage('completed');
+            setProcessingProgress(prev => ({
+              ...prev,
+              transcribing: 100
+            }));
+          } else if (data.status === 'failed') {
+            setProcessingStage('failed');
+            setProcessingError(data.error || 'Unknown error occurred during processing');
+          } else if (data.status === 'processing') {
+            // Update progress based on error message which contains progress info
+            if (data.error) {
+              if (data.error.includes('Converting')) {
+                setProcessingStage('converting');
+                // Extract percentage if available
+                const match = data.error.match(/Converting.*?(\d+)%/);
+                const percentage = match ? parseInt(match[1]) : 50;
+                
+                setProcessingProgress(prev => ({
+                  ...prev,
+                  uploading: 100,
+                  converting: percentage || 50
+                }));
+              } else if (data.error.includes('Processing') || data.error.includes('chunk') || data.error.includes('transcrib')) {
+                setProcessingStage('transcribing');
+                // Extract percentage if available or calculate based on chunks
+                const chunkMatch = data.error.match(/segment (\d+) of (\d+)/i);
+                let transcribingProgress = 20; // Default progress
+                
+                if (chunkMatch && chunkMatch[1] && chunkMatch[2]) {
+                  const currentChunk = parseInt(chunkMatch[1]);
+                  const totalChunks = parseInt(chunkMatch[2]);
+                  transcribingProgress = Math.round((currentChunk / totalChunks) * 100);
+                }
+                
+                setProcessingProgress(prev => ({
+                  ...prev,
+                  uploading: 100,
+                  converting: 100,
+                  transcribing: transcribingProgress
+                }));
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error checking transcription status:", err);
+      }
+    };
+    
+    // Check more frequently initially, then slow down
+    let checkCount = 0;
+    const initialInterval = setInterval(() => {
+      checkTranscription();
+      checkCount++;
+      
+      // After 5 checks (15 seconds), switch to a slower interval
+      if (checkCount >= 5) {
+        clearInterval(initialInterval);
+        
+        // Set up a slower polling interval
+        const slowInterval = setInterval(checkTranscription, 5000); // every 5 seconds
+        return () => clearInterval(slowInterval);
+      }
+    }, 3000); // every 3 seconds initially
+    
+    return () => clearInterval(initialInterval);
+  }, [currentTranscriptionId, isProcessing]);
   
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -118,6 +217,13 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     setDialogOpen(false);
     setUploading(true);
     setUploadProgress(0);
+    setProcessingStage("uploading");
+    setProcessingProgress({
+      uploading: 0,
+      converting: 0,
+      transcribing: 0
+    });
+    setProcessingError(null);
 
     try {
       // Create a unique file path
@@ -129,7 +235,12 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
         setUploadProgress(prev => {
           // Cap at 90% until we confirm upload is complete
           if (prev < 90) {
-            return prev + 5;
+            const newProgress = prev + 5;
+            setProcessingProgress(prevState => ({
+              ...prevState,
+              uploading: newProgress
+            }));
+            return newProgress;
           }
           return prev;
         });
@@ -145,8 +256,14 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
 
       clearInterval(progressInterval);
       setUploadProgress(100);
+      setProcessingProgress(prev => ({
+        ...prev,
+        uploading: 100
+      }));
 
       if (uploadError) {
+        setProcessingStage("failed");
+        setProcessingError(`Error uploading file: ${uploadError.message}`);
         throw new Error(`Error uploading file: ${uploadError.message}`);
       }
 
@@ -167,18 +284,22 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
 
       if (!response.ok) {
         const errorData = await response.json();
+        setProcessingStage("failed");
+        setProcessingError(errorData.error || "Unknown error occurred");
         throw new Error(`Transcription error: ${errorData.error || 'Unknown error'}`);
       }
 
       const result = await response.json();
+      setCurrentTranscriptionId(result.id);
       
-      // Provide format-specific success messages
       // Using the file extension we already obtained for validation
       const fileExtension = selectedFile.name.split('.').pop()?.toLowerCase();
       if (fileExtension === 'm4a' || fileExtension === 'mp4') {
-        toast.success('File uploaded. M4A/MP4 processing may take longer than usual.');
+        setProcessingStage("converting");
+        // Don't show toast, we'll use the UI indicators instead
       } else {
-        toast.success('File uploaded and transcription started');
+        setProcessingStage("transcribing");
+        // Don't show toast, we'll use the UI indicators instead
       }
       
       // Pass the file, transcription ID, and custom title to parent component
@@ -211,42 +332,44 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     <>
       <Card className="w-full max-w-2xl mx-auto p-6 shadow-lg">
         <div className="space-y-6">
-          <div 
-            className={`file-drop-area border-2 border-dashed rounded-lg p-8 ${dragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'}`}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-          >
-            <div className="flex flex-col items-center justify-center space-y-4">
-              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
-                <Upload className="w-8 h-8 text-primary" />
+          {!isProcessing && !uploading && (
+            <div 
+              className={`file-drop-area border-2 border-dashed rounded-lg p-8 ${dragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'}`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+            >
+              <div className="flex flex-col items-center justify-center space-y-4">
+                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
+                  <Upload className="w-8 h-8 text-primary" />
+                </div>
+                <div className="text-center">
+                  <h3 className="font-semibold text-lg">Drag and drop your audio file</h3>
+                  <p className="text-sm text-muted-foreground">Or click to browse files</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Supports MP3, WAV, M4A, MP4, and other audio formats
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={() => inputRef.current?.click()}
+                  className="mt-4"
+                  disabled={isProcessing || uploading}
+                >
+                  Select File
+                </Button>
+                <input
+                  ref={inputRef}
+                  type="file"
+                  className="hidden"
+                  accept="audio/*"
+                  onChange={handleChange}
+                  disabled={isProcessing || uploading}
+                />
               </div>
-              <div className="text-center">
-                <h3 className="font-semibold text-lg">Drag and drop your audio file</h3>
-                <p className="text-sm text-muted-foreground">Or click to browse files</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Supports MP3, WAV, M4A, MP4, and other audio formats
-                </p>
-              </div>
-              <Button
-                type="button"
-                onClick={() => inputRef.current?.click()}
-                className="mt-4"
-                disabled={isProcessing || uploading}
-              >
-                Select File
-              </Button>
-              <input
-                ref={inputRef}
-                type="file"
-                className="hidden"
-                accept="audio/*"
-                onChange={handleChange}
-                disabled={isProcessing || uploading}
-              />
             </div>
-          </div>
+          )}
 
           {uploading && (
             <div className="space-y-2">
@@ -264,22 +387,39 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
           )}
 
           {isProcessing && !uploading && (
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Processing</span>
-                <span>Please wait...</span>
-              </div>
-              <Progress 
-                value={50} 
-                className="animate-pulse-slow" 
+            <div className="space-y-6">
+              <h3 className="text-lg font-medium text-center">Processing Your Audio</h3>
+              
+              {selectedFile && (
+                <div className="bg-muted rounded-lg p-4 mb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center">
+                      <span className="text-primary text-sm">🎵</span>
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm">{selectedFile.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatFileSize(selectedFile.size)}
+                        {isM4aFormat(selectedFile) && (
+                          <span className="text-amber-600 ml-2">
+                            (Format conversion in progress)
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <ProcessingStages 
+                currentStage={processingStage}
+                progress={processingProgress}
+                error={processingError}
               />
-              <p className="text-xs text-muted-foreground text-center">
-                Processing transcription with OpenAI Whisper
-                {selectedFile && isM4aFormat(selectedFile) && (
-                  <span className="block mt-1 text-amber-600">
-                    M4A/MP4 files require additional processing time
-                  </span>
-                )}
+              
+              <p className="text-xs text-muted-foreground text-center mt-6">
+                {processingStage === "transcribing" && "Transcription time varies based on audio length and complexity"}
+                {processingStage === "converting" && "M4A/MP4 files require format conversion for optimal transcription"}
               </p>
             </div>
           )}
