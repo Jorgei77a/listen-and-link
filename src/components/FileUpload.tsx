@@ -1,4 +1,3 @@
-
 import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -90,6 +89,13 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     // Open the dialog immediately after file is selected
     setDialogOpen(true);
     
+    // Show format-specific notifications
+    if (fileExt === 'm4a' || fileExt === 'mp4') {
+      toast.info("M4A/MP4 files will be converted for better processing. This may take longer.", {
+        duration: 5000
+      });
+    }
+    
     toast.success(`File "${file.name}" selected`);
   };
 
@@ -165,7 +171,14 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
       }
 
       const result = await response.json();
-      toast.success('File uploaded and transcription started');
+      
+      // Provide format-specific success messages
+      const fileExt = selectedFile.name.split('.').pop()?.toLowerCase();
+      if (fileExt === 'm4a' || fileExt === 'mp4') {
+        toast.success('File uploaded. M4A/MP4 processing may take longer than usual.');
+      } else {
+        toast.success('File uploaded and transcription started');
+      }
       
       // Pass the file, transcription ID, and custom title to parent component
       onFileUpload(selectedFile, result.id, finalTitle);
@@ -184,6 +197,13 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  // Check if a file is an m4a/mp4 format
+  const isM4aFormat = (file: File | null): boolean => {
+    if (!file) return false;
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    return ext === 'm4a' || ext === 'mp4';
   };
 
   return (
@@ -205,7 +225,7 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
                 <h3 className="font-semibold text-lg">Drag and drop your audio file</h3>
                 <p className="text-sm text-muted-foreground">Or click to browse files</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Supports MP3, WAV, OGG, and other audio formats
+                  Supports MP3, WAV, M4A, MP4, and other audio formats
                 </p>
               </div>
               <Button
@@ -254,6 +274,11 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
               />
               <p className="text-xs text-muted-foreground text-center">
                 Processing transcription with OpenAI Whisper
+                {selectedFile && isM4aFormat(selectedFile) && (
+                  <span className="block mt-1 text-amber-600">
+                    M4A/MP4 files require additional processing time
+                  </span>
+                )}
               </p>
             </div>
           )}
@@ -288,6 +313,11 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
                     {selectedFile.size > 23 * 1024 * 1024 && (
                       <span className="text-yellow-600 ml-2">
                         (Will be chunked for processing)
+                      </span>
+                    )}
+                    {isM4aFormat(selectedFile) && (
+                      <span className="text-amber-600 block mt-1">
+                        M4A/MP4 format will be converted for better processing
                       </span>
                     )}
                   </p>
