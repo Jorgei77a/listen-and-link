@@ -9,6 +9,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { v4 as uuidv4 } from "uuid";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 interface FileUploadProps {
   onFileUpload: (file: File, transcriptionId?: string, customTitle?: string) => void;
@@ -22,7 +30,8 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [customTitle, setCustomTitle] = useState("");
-
+  const [dialogOpen, setDialogOpen] = useState(false);
+  
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -77,7 +86,18 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     setSelectedFile(file);
     // Set a default title based on file name without extension
     setCustomTitle(file.name.split('.').slice(0, -1).join('.'));
+    
+    // Open the dialog immediately after file is selected
+    setDialogOpen(true);
+    
     toast.success(`File "${file.name}" selected`);
+  };
+
+  const handleDialogClose = () => {
+    if (!uploading) {
+      setDialogOpen(false);
+      // We don't reset the selected file here to allow the user to reopen the dialog
+    }
   };
 
   const handleSubmit = async () => {
@@ -88,7 +108,8 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
 
     // Use the custom title or fallback to the filename if empty
     const finalTitle = customTitle.trim() || selectedFile.name.split('.').slice(0, -1).join('.');
-
+    
+    setDialogOpen(false);
     setUploading(true);
     setUploadProgress(0);
 
@@ -166,48 +187,94 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
   };
 
   return (
-    <Card className="w-full max-w-2xl mx-auto p-6 shadow-lg">
-      <div className="space-y-6">
-        <div 
-          className={`file-drop-area border-2 border-dashed rounded-lg p-8 ${dragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'}`}
-          onDragEnter={handleDrag}
-          onDragLeave={handleDrag}
-          onDragOver={handleDrag}
-          onDrop={handleDrop}
-        >
-          <div className="flex flex-col items-center justify-center space-y-4">
-            <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
-              <Upload className="w-8 h-8 text-primary" />
+    <>
+      <Card className="w-full max-w-2xl mx-auto p-6 shadow-lg">
+        <div className="space-y-6">
+          <div 
+            className={`file-drop-area border-2 border-dashed rounded-lg p-8 ${dragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'}`}
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+          >
+            <div className="flex flex-col items-center justify-center space-y-4">
+              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
+                <Upload className="w-8 h-8 text-primary" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-semibold text-lg">Drag and drop your audio file</h3>
+                <p className="text-sm text-muted-foreground">Or click to browse files</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Supports MP3, WAV, OGG, and other audio formats
+                </p>
+              </div>
+              <Button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                className="mt-4"
+                disabled={isProcessing || uploading}
+              >
+                Select File
+              </Button>
+              <input
+                ref={inputRef}
+                type="file"
+                className="hidden"
+                accept="audio/*"
+                onChange={handleChange}
+                disabled={isProcessing || uploading}
+              />
             </div>
-            <div className="text-center">
-              <h3 className="font-semibold text-lg">Drag and drop your audio file</h3>
-              <p className="text-sm text-muted-foreground">Or click to browse files</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Supports MP3, WAV, OGG, and other audio formats
+          </div>
+
+          {uploading && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Uploading</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <Progress 
+                value={uploadProgress} 
+              />
+              <p className="text-xs text-muted-foreground text-center">
+                Please wait while your file is being uploaded
               </p>
             </div>
-            <Button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              className="mt-4"
-              disabled={isProcessing || uploading}
-            >
-              Select File
-            </Button>
-            <input
-              ref={inputRef}
-              type="file"
-              className="hidden"
-              accept="audio/*"
-              onChange={handleChange}
-              disabled={isProcessing || uploading}
-            />
-          </div>
-        </div>
+          )}
 
-        {selectedFile && (
-          <div className="bg-muted p-4 rounded-lg space-y-4">
-            <div className="flex items-center justify-between">
+          {isProcessing && !uploading && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Processing</span>
+                <span>Please wait...</span>
+              </div>
+              <Progress 
+                value={50} 
+                className="animate-pulse-slow" 
+              />
+              <p className="text-xs text-muted-foreground text-center">
+                Processing transcription with OpenAI Whisper
+              </p>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Dialog open={dialogOpen} onOpenChange={(open) => {
+        if (!uploading) {
+          setDialogOpen(open);
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Name Your Transcript</DialogTitle>
+            <DialogDescription>
+              Provide a title for this audio transcription. The default uses the file name.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedFile && (
+            <div className="p-4 bg-muted rounded-lg mb-4">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center">
                   <span className="text-primary text-sm">🎵</span>
@@ -227,65 +294,44 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
                 </div>
               </div>
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="transcript-title" className="text-sm">Transcript Title</Label>
-              <Input
-                id="transcript-title"
-                value={customTitle}
-                onChange={(e) => setCustomTitle(e.target.value)}
-                placeholder="Enter a title for your transcript"
-                className="w-full"
-                disabled={isProcessing || uploading}
-              />
-              <p className="text-xs text-muted-foreground">
-                This title will be used for the transcript and download file name
-              </p>
-            </div>
-            
-            <div className="flex justify-end">
-              <Button 
-                onClick={handleSubmit} 
-                disabled={isProcessing || uploading}
-              >
-                {uploading ? "Uploading..." : "Transcribe Now"}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {uploading && (
+          )}
+          
           <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span>Uploading</span>
-              <span>{uploadProgress}%</span>
-            </div>
-            <Progress 
-              value={uploadProgress} 
+            <Label htmlFor="transcript-title" className="text-sm">Transcript Title</Label>
+            <Input
+              id="transcript-title"
+              value={customTitle}
+              onChange={(e) => setCustomTitle(e.target.value)}
+              placeholder="Enter a title for your transcript"
+              className="w-full"
+              disabled={isProcessing || uploading}
+              autoComplete="off"
+              autoFocus
             />
-            <p className="text-xs text-muted-foreground text-center">
-              Please wait while your file is being uploaded
+            <p className="text-xs text-muted-foreground">
+              This title will be used for the transcript and download file name
             </p>
           </div>
-        )}
 
-        {isProcessing && !uploading && (
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span>Processing</span>
-              <span>Please wait...</span>
-            </div>
-            <Progress 
-              value={50} 
-              className="animate-pulse-slow" 
-            />
-            <p className="text-xs text-muted-foreground text-center">
-              Processing transcription with OpenAI Whisper
-            </p>
-          </div>
-        )}
-      </div>
-    </Card>
+          <DialogFooter className="sm:justify-between">
+            <Button 
+              variant="outline" 
+              onClick={handleDialogClose}
+              disabled={uploading}
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSubmit} 
+              disabled={isProcessing || uploading}
+              className="ml-2"
+            >
+              Transcribe Now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
 
