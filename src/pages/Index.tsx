@@ -14,6 +14,7 @@ const Index = () => {
   const [currentFileName, setCurrentFileName] = useState<string>("");
   const [currentTranscriptionId, setCurrentTranscriptionId] = useState<string | null>(null);
   const [customTitle, setCustomTitle] = useState<string>("");
+  const [transcriptionCompleted, setTranscriptionCompleted] = useState(false);
 
   // Poll for transcription status if we have an ID
   useEffect(() => {
@@ -35,7 +36,12 @@ const Index = () => {
         if (data.status === 'completed' && data.transcript) {
           setTranscript(data.transcript);
           setIsProcessing(false);
-          toast.success("Transcription complete!");
+          
+          // Only show completion toast if we haven't already
+          if (!transcriptionCompleted) {
+            toast.success("Transcription complete!");
+            setTranscriptionCompleted(true);
+          }
         } else if (data.status === 'failed') {
           setIsProcessing(false);
           toast.error(`Transcription failed: ${data.error || 'Unknown error'}`);
@@ -45,12 +51,13 @@ const Index = () => {
     
     const intervalId = setInterval(checkTranscription, 3000);
     return () => clearInterval(intervalId);
-  }, [currentTranscriptionId]);
+  }, [currentTranscriptionId, transcriptionCompleted]);
 
   const handleFileUpload = async (file: File, transcriptionId?: string, title?: string) => {
     setIsProcessing(true);
     setCurrentFileName(file.name);
     setCustomTitle(title || file.name.split('.')[0]);
+    setTranscriptionCompleted(false);
     
     if (transcriptionId) {
       setCurrentTranscriptionId(transcriptionId);
@@ -62,6 +69,7 @@ const Index = () => {
     setCurrentFileName("");
     setCurrentTranscriptionId(null);
     setCustomTitle("");
+    setTranscriptionCompleted(false);
   };
 
   return (
