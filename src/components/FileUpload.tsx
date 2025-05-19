@@ -74,17 +74,27 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
       const fileExt = selectedFile.name.split('.').pop();
       const filePath = `${uuidv4()}.${fileExt}`;
 
+      // Simulate upload progress since we can't use onUploadProgress
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          // Cap at 90% until we confirm upload is complete
+          if (prev < 90) {
+            return prev + 5;
+          }
+          return prev;
+        });
+      }, 200);
+
       // Upload file to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('audio_files')
         .upload(filePath, selectedFile, {
           cacheControl: '3600',
-          upsert: false,
-          onUploadProgress: (progress) => {
-            const percent = Math.round((progress.loaded / progress.total) * 100);
-            setUploadProgress(percent);
-          }
+          upsert: false
         });
+
+      clearInterval(progressInterval);
+      setUploadProgress(100);
 
       if (uploadError) {
         throw new Error(`Error uploading file: ${uploadError.message}`);
