@@ -12,6 +12,7 @@ export type Database = {
       transcriptions: {
         Row: {
           created_at: string | null
+          custom_title: string | null
           error: string | null
           file_name: string
           file_path: string
@@ -23,6 +24,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          custom_title?: string | null
           error?: string | null
           file_name: string
           file_path: string
@@ -34,6 +36,7 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          custom_title?: string | null
           error?: string | null
           file_name?: string
           file_path?: string
