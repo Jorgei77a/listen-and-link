@@ -8,6 +8,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// OpenAI Whisper API size limit (25MB in bytes)
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -54,34 +57,24 @@ serve(async (req) => {
       throw new Error(`Failed to download file: ${downloadError?.message}`);
     }
     
-    // Send to OpenAI Whisper API
-    const formData = new FormData();
-    formData.append('file', fileData, fileName);
-    formData.append('model', 'whisper-1');
+    // Process file based on size
+    let transcript = '';
     
-    const openaiResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
-      },
-      body: formData,
-    });
-    
-    if (!openaiResponse.ok) {
-      const errorData = await openaiResponse.text();
-      await updateTranscriptionStatus(supabase, transcription.id, 'failed', null, `OpenAI API error: ${errorData}`);
-      throw new Error(`OpenAI API error: ${errorData}`);
+    if (fileData.size <= MAX_FILE_SIZE) {
+      // Process small file normally
+      transcript = await processAudioChunk(fileData, fileName);
+    } else {
+      // Large file needs chunking
+      transcript = await processLargeFile(fileData, fileName);
     }
     
-    const result = await openaiResponse.json();
-    
     // Update transcription with result
-    await updateTranscriptionStatus(supabase, transcription.id, 'completed', result.text);
+    await updateTranscriptionStatus(supabase, transcription.id, 'completed', transcript);
     
     return new Response(
       JSON.stringify({ 
         id: transcription.id,
-        transcript: result.text 
+        transcript: transcript 
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -97,6 +90,72 @@ serve(async (req) => {
     );
   }
 });
+
+// Process a single audio chunk with Whisper API
+async function processAudioChunk(audioData: Blob, fileName: string): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', audioData, fileName);
+  formData.append('model', 'whisper-1');
+  
+  const openaiResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+    },
+    body: formData,
+  });
+  
+  if (!openaiResponse.ok) {
+    const errorData = await openaiResponse.text();
+    throw new Error(`OpenAI API error: ${errorData}`);
+  }
+  
+  const result = await openaiResponse.json();
+  return result.text;
+}
+
+// Process large audio file by splitting into chunks
+async function processLargeFile(fileData: Blob, fileName: string): Promise<string> {
+  console.log(`Processing large file: ${fileName}, size: ${fileData.size} bytes`);
+  
+  // Convert blob to array buffer for processing
+  const arrayBuffer = await fileData.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+  
+  // Calculate number of chunks needed
+  const chunkSize = MAX_FILE_SIZE - 1024 * 1024; // Leave 1MB buffer
+  const numChunks = Math.ceil(fileData.size / chunkSize);
+  console.log(`Splitting into ${numChunks} chunks of ~${chunkSize / (1024 * 1024)}MB each`);
+  
+  const transcriptions: string[] = [];
+  
+  // Process each chunk
+  for (let i = 0; i < numChunks; i++) {
+    const start = i * chunkSize;
+    const end = Math.min((i + 1) * chunkSize, fileData.size);
+    
+    console.log(`Processing chunk ${i + 1}/${numChunks}, bytes ${start}-${end}`);
+    
+    // Get chunk data
+    const chunkData = uint8Array.slice(start, end);
+    const chunkBlob = new Blob([chunkData], { type: fileData.type });
+    
+    try {
+      // Process this chunk
+      const chunkFileName = `${fileName.split('.')[0]}_chunk${i + 1}.${fileName.split('.').pop()}`;
+      const chunkTranscription = await processAudioChunk(chunkBlob, chunkFileName);
+      
+      transcriptions.push(chunkTranscription);
+      console.log(`Chunk ${i + 1} transcription complete`);
+    } catch (error) {
+      console.error(`Error processing chunk ${i + 1}:`, error);
+      // Continue with other chunks even if one fails
+    }
+  }
+  
+  // Combine all transcriptions
+  return transcriptions.join(' ');
+}
 
 // Helper function to update transcription status
 async function updateTranscriptionStatus(
