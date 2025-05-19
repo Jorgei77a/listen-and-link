@@ -49,10 +49,25 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
   };
 
   const validateAndSetFile = (file: File) => {
-    // Check file type
-    const validAudioTypes = ['audio/mpeg', 'audio/wav', 'audio/mp3', 'audio/mp4', 'audio/ogg', 'audio/webm'];
-    if (!validAudioTypes.includes(file.type)) {
-      toast.error("Please upload an audio file (MP3, WAV, OGG, etc.)");
+    // Check file type - updated to match Whisper supported formats
+    const validAudioTypes = [
+      'audio/mpeg', // mp3, mpga
+      'audio/wav',  // wav
+      'audio/mp3',  
+      'audio/mp4',  // mp4
+      'audio/webm', // webm
+      'audio/m4a',  // m4a
+      'audio/x-m4a',// m4a alternative MIME type
+      'audio/mpga', // mpga
+      'audio/mpeg' // alternative MIME type for mp3
+    ];
+    
+    // Also check file extension as backup validation
+    const validExtensions = ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'];
+    const fileExt = file.name.split('.').pop()?.toLowerCase();
+    
+    if (!validAudioTypes.includes(file.type) && !validExtensions.includes(fileExt || '')) {
+      toast.error("Please upload a supported audio file format (MP3, MP4, M4A, WAV, WEBM)");
       return;
     }
 
