@@ -13,6 +13,7 @@ const Index = () => {
   const [transcript, setTranscript] = useState<string | null>(null);
   const [currentFileName, setCurrentFileName] = useState<string>("");
   const [currentTranscriptionId, setCurrentTranscriptionId] = useState<string | null>(null);
+  const [customTitle, setCustomTitle] = useState<string>("");
 
   // Poll for transcription status if we have an ID
   useEffect(() => {
@@ -46,9 +47,10 @@ const Index = () => {
     return () => clearInterval(intervalId);
   }, [currentTranscriptionId]);
 
-  const handleFileUpload = async (file: File, transcriptionId?: string) => {
+  const handleFileUpload = async (file: File, transcriptionId?: string, title?: string) => {
     setIsProcessing(true);
     setCurrentFileName(file.name);
+    setCustomTitle(title || file.name.split('.')[0]);
     
     if (transcriptionId) {
       setCurrentTranscriptionId(transcriptionId);
@@ -59,6 +61,7 @@ const Index = () => {
     setTranscript(null);
     setCurrentFileName("");
     setCurrentTranscriptionId(null);
+    setCustomTitle("");
   };
 
   return (
@@ -79,7 +82,8 @@ const Index = () => {
           {transcript ? (
             <TranscriptionDisplay 
               transcript={transcript} 
-              fileName={currentFileName} 
+              fileName={currentFileName}
+              customTitle={customTitle}
               onReset={handleReset} 
             />
           ) : (

@@ -7,9 +7,11 @@ import { toast } from "sonner";
 import { Upload } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { v4 as uuidv4 } from "uuid";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface FileUploadProps {
-  onFileUpload: (file: File, transcriptionId?: string) => void;
+  onFileUpload: (file: File, transcriptionId?: string, customTitle?: string) => void;
   isProcessing: boolean;
 }
 
@@ -19,6 +21,7 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [customTitle, setCustomTitle] = useState("");
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -72,6 +75,8 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     }
 
     setSelectedFile(file);
+    // Set a default title based on file name without extension
+    setCustomTitle(file.name.split('.').slice(0, -1).join('.'));
     toast.success(`File "${file.name}" selected`);
   };
 
@@ -80,6 +85,9 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
       toast.error("Please select a file first");
       return;
     }
+
+    // Use the custom title or fallback to the filename if empty
+    const finalTitle = customTitle.trim() || selectedFile.name.split('.').slice(0, -1).join('.');
 
     setUploading(true);
     setUploadProgress(0);
@@ -125,7 +133,8 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
         body: JSON.stringify({
           filePath: filePath,
           fileName: selectedFile.name,
-          fileSize: selectedFile.size
+          fileSize: selectedFile.size,
+          customTitle: finalTitle
         })
       });
 
@@ -137,8 +146,8 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
       const result = await response.json();
       toast.success('File uploaded and transcription started');
       
-      // Pass the file and transcription ID to parent component
-      onFileUpload(selectedFile, result.id);
+      // Pass the file, transcription ID, and custom title to parent component
+      onFileUpload(selectedFile, result.id, finalTitle);
       
     } catch (error: any) {
       console.error('Upload error:', error);
@@ -197,7 +206,7 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
         </div>
 
         {selectedFile && (
-          <div className="bg-muted p-4 rounded-lg">
+          <div className="bg-muted p-4 rounded-lg space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center">
@@ -217,6 +226,24 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
                   </p>
                 </div>
               </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="transcript-title" className="text-sm">Transcript Title</Label>
+              <Input
+                id="transcript-title"
+                value={customTitle}
+                onChange={(e) => setCustomTitle(e.target.value)}
+                placeholder="Enter a title for your transcript"
+                className="w-full"
+                disabled={isProcessing || uploading}
+              />
+              <p className="text-xs text-muted-foreground">
+                This title will be used for the transcript and download file name
+              </p>
+            </div>
+            
+            <div className="flex justify-end">
               <Button 
                 onClick={handleSubmit} 
                 disabled={isProcessing || uploading}

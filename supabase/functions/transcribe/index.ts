@@ -15,7 +15,7 @@ serve(async (req) => {
   }
 
   try {
-    const { filePath, fileName, fileSize } = await req.json();
+    const { filePath, fileName, fileSize, customTitle } = await req.json();
     
     if (!filePath || !fileName) {
       throw new Error('File path and name are required');
@@ -33,7 +33,8 @@ serve(async (req) => {
         file_name: fileName,
         file_path: filePath,
         file_size: fileSize,
-        status: 'processing'
+        status: 'processing',
+        custom_title: customTitle || fileName.split('.')[0] // Store the custom title
       })
       .select()
       .single();
