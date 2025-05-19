@@ -3,4 +3,5 @@ project_id = "btfhfujdrvvkdiobitsb"
 
 [functions.transcribe]
 verify_jwt = false
-timeout_seconds = 120
+timeout_seconds = 540
+
