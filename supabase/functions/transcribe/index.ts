@@ -146,14 +146,6 @@ async function processTranscription(
       throw new Error(`Failed to download file: ${downloadError?.message}`);
     }
     
-    // Update status to show download complete
-    await updateTranscriptionProgress(
-      supabase,
-      transcriptionId,
-      'processing',
-      'File downloaded, starting transcription'
-    );
-    
     // Process file based on size
     let transcript = '';
     
@@ -161,20 +153,41 @@ async function processTranscription(
       // Process small file normally
       transcript = await processAudioChunk(fileData, fileName);
       
-      // Update status to show transcription is done
-      await updateTranscriptionProgress(
-        supabase,
-        transcriptionId,
-        'processing',
-        'Transcription complete, finalizing'
-      );
+      console.log(`Transcription complete for ${fileName}, saving result of length: ${transcript.length}`);
     } else {
       // Large file needs intelligent chunking
       transcript = await processLargeFile(supabase, transcriptionId, fileData, fileName);
+      
+      console.log(`Large file transcription complete for ${fileName}, final result length: ${transcript.length}`);
     }
     
-    // Update transcription with result
-    await updateTranscriptionStatus(supabase, transcriptionId, 'completed', transcript);
+    // Update transcription with result - ensure we're setting the transcript field correctly
+    if (!transcript) {
+      console.error(`Empty transcript result for ${fileName}`);
+      await updateTranscriptionStatus(
+        supabase, 
+        transcriptionId, 
+        'failed', 
+        null, 
+        `Processing error: Empty transcript returned from OpenAI`
+      );
+      return;
+    }
+    
+    // Update the database with the final transcript
+    const { error: updateError } = await supabase
+      .from('transcriptions')
+      .update({
+        status: 'completed',
+        transcript: transcript,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', transcriptionId);
+    
+    if (updateError) {
+      console.error(`Failed to save final transcript: ${updateError.message}`);
+      throw new Error(`Failed to save final transcript: ${updateError.message}`);
+    }
     
     console.log(`Transcription completed successfully for ${fileName}`);
     
@@ -228,11 +241,6 @@ async function processLargeFile(
   
   const fileExt = fileName.split('.').pop()?.toLowerCase() || '';
   
-  // For m4a files and other formats, we need to use time-based chunking
-  // But since we can't easily do that in this environment, we'll use a specialized approach
-  
-  // For now, we'll use a more intelligent byte-based chunking that preserves file headers
-  
   // Calculate optimal chunk size based on file type
   // Leave extra headroom for headers to ensure valid audio fragments
   const chunkSize = MAX_FILE_SIZE - 2 * 1024 * 1024; // 2MB safety buffer
@@ -245,16 +253,7 @@ async function processLargeFile(
   const estimatedChunks = Math.ceil(fileData.size / chunkSize);
   console.log(`Estimated ${estimatedChunks} chunks needed for processing`);
   
-  // Update status to show chunking started
-  await updateTranscriptionProgress(
-    supabase,
-    transcriptionId,
-    'processing',
-    `Splitting file into ${estimatedChunks} segments for processing`
-  );
-  
   // For audio formats that need header preservation, we create temporary files with headers
-
   // For m4a and formats where splitting is problematic, use header-aware chunking
   if (['m4a', 'mp4'].includes(fileExt)) {
     return await processAudioWithHeaders(supabase, transcriptionId, fileBytes, fileExt, fileName, chunkSize);
@@ -292,11 +291,12 @@ async function processAudioWithHeaders(
   
   // Process each content chunk with header prepended
   for (let i = 0; i < numChunks; i++) {
-    // Update progress
-    await updateTranscriptionProgress(
+    // Create status update for database
+    await updateTranscriptionStatus(
       supabase,
       transcriptionId,
       'processing',
+      null,
       `Processing segment ${i+1} of ${numChunks}`
     );
     
@@ -354,11 +354,12 @@ async function processRegularChunks(
   
   // Process each chunk
   for (let i = 0; i < numChunks; i++) {
-    // Update progress
-    await updateTranscriptionProgress(
+    // Update status in database
+    await updateTranscriptionStatus(
       supabase,
       transcriptionId,
       'processing',
+      null,
       `Processing segment ${i+1} of ${numChunks}`
     );
     
@@ -430,16 +431,21 @@ async function updateTranscriptionProgress(
   status: string,
   progress_message: string
 ) {
-  const { error: updateError } = await supabase
-    .from('transcriptions')
-    .update({
-      status,
-      progress_message,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', id);
-    
-  if (updateError) {
-    console.error('Failed to update transcription progress:', updateError);
+  try {
+    const { error: updateError } = await supabase
+      .from('transcriptions')
+      .update({
+        status,
+        error: progress_message, // Using the error field to store progress messages
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
+      
+    if (updateError) {
+      console.error('Failed to update transcription progress:', updateError);
+    }
+  } catch (err) {
+    console.error('Error in updateTranscriptionProgress:', err);
   }
 }
+
