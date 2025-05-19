@@ -40,30 +40,11 @@ const Index = () => {
           setIsProcessing(false);
           toast.error(`Transcription failed: ${data.error || 'Unknown error'}`);
         }
-        // We no longer need these progress toasts as we show progress in the UI
-        // else if (data.status === 'processing' && data.error) {
-        //   toast.info(data.error, { id: 'processing-status', duration: 2000 });
-        // }
       }
     };
     
-    // Check more frequently initially, then slow down
-    let checkCount = 0;
-    const initialInterval = setInterval(() => {
-      checkTranscription();
-      checkCount++;
-      
-      // After 5 checks (15 seconds), switch to a slower interval
-      if (checkCount >= 5) {
-        clearInterval(initialInterval);
-        
-        // Set up a slower polling interval
-        const slowInterval = setInterval(checkTranscription, 5000); // every 5 seconds
-        return () => clearInterval(slowInterval);
-      }
-    }, 3000); // every 3 seconds initially
-    
-    return () => clearInterval(initialInterval);
+    const intervalId = setInterval(checkTranscription, 3000);
+    return () => clearInterval(intervalId);
   }, [currentTranscriptionId]);
 
   const handleFileUpload = async (file: File, transcriptionId?: string, title?: string) => {
@@ -73,17 +54,6 @@ const Index = () => {
     
     if (transcriptionId) {
       setCurrentTranscriptionId(transcriptionId);
-      
-      // Remove toast notifications since we now show progress in the UI
-      // const fileExt = file.name.split('.').pop()?.toLowerCase();
-      // if (fileExt === 'm4a' || fileExt === 'mp4') {
-      //   setTimeout(() => {
-      //     toast.info("M4A/MP4 files require additional processing time. Please be patient.", { 
-      //       duration: 10000,
-      //       id: 'm4a-processing-notice'
-      //     });
-      //   }, 5000);
-      // }
     }
   };
 
