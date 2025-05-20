@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useState } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
@@ -85,6 +86,7 @@ export function LexicalEditor({
   const [isEditorMounted, setIsEditorMounted] = useState(false);
   const [isContentPopulated, setIsContentPopulated] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [isContentVisible, setIsContentVisible] = useState(false);
   const contentEditableRef = useRef<HTMLDivElement | null>(null);
   const initAttempts = useRef(0);
   
@@ -193,10 +195,13 @@ export function LexicalEditor({
             // This empty update forces a re-render
           });
           
+          // Force visibility check
+          setIsContentVisible(true);
+          
           // Hide the loading state
           setIsInitializing(false);
         }
-      }, 150);
+      }, 300);
     } catch (error) {
       console.error("Error populating editor:", error);
       // Even if there's an error, hide the loading state
@@ -236,8 +241,15 @@ export function LexicalEditor({
           console.log("Editor element found:", editorElement);
           const paragraphs = editorElement.querySelectorAll('p');
           console.log(`Found ${paragraphs.length} paragraphs in DOM`);
+
+          // Final safeguard - force initialize to false even if other methods failed
+          if (paragraphs.length > 0) {
+            console.log("Content is visible in DOM, forcing initializing state to false");
+            setIsInitializing(false);
+            setIsContentVisible(true);
+          }
         }
-      }, 200);
+      }, 400);
     } catch (error) {
       console.error("Error applying timestamp attributes:", error);
     }
@@ -284,8 +296,8 @@ export function LexicalEditor({
       initAttempts.current += 1;
       console.log(`Retry attempt ${initAttempts.current} to populate content...`);
       
-      if (initAttempts.current > 3) {
-        console.error("Failed to initialize editor after multiple attempts");
+      if (initAttempts.current > 5) {
+        console.log("Maximum retry attempts reached, forcing initialization complete");
         setIsInitializing(false);
         return;
       }
@@ -314,16 +326,29 @@ export function LexicalEditor({
           // Force-hide loading state after retry
           setTimeout(() => {
             setIsInitializing(false);
-          }, 200);
+            setIsContentVisible(true);
+          }, 300);
         } catch (error) {
           console.error("Error during retry:", error);
           setIsInitializing(false);
         }
       }
-    }, 1000);
+    }, 800);
     
     return () => clearTimeout(retryInterval);
   }, [isEditorMounted, isContentPopulated, initialText, segments]);
+
+  // Force initialization to complete after maximum timeout
+  useEffect(() => {
+    const maxTimeout = setTimeout(() => {
+      if (isInitializing) {
+        console.log("Maximum wait time reached, forcing initialization complete");
+        setIsInitializing(false);
+      }
+    }, 5000); // 5 second maximum waiting time
+    
+    return () => clearTimeout(maxTimeout);
+  }, [isInitializing]);
 
   return (
     <div className={cn("border rounded-md", className)}>
