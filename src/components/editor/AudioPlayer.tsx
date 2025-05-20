@@ -7,7 +7,7 @@ interface AudioPlayerProps {
   src: string;
   className?: string;
   onTimeUpdate?: (currentTime: number) => void;
-  onJumpToTime?: (callback: (time: number) => void) => void;
+  onJumpToTime?: (callback: (time: number) => void) => void | (() => void);
 }
 
 export function AudioPlayer({ 
@@ -374,10 +374,13 @@ export function AudioPlayer({
         }
       };
       
-      const cleanup = onJumpToTime(stableJumpToTimeCallback);
+      const cleanupFunction = onJumpToTime(stableJumpToTimeCallback);
       
       return () => {
-        if (cleanup) cleanup();
+        // Only call the cleanup function if it exists and is callable
+        if (typeof cleanupFunction === 'function') {
+          cleanupFunction();
+        }
       };
     }
     
