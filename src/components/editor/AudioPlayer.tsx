@@ -15,7 +15,7 @@ interface AudioPlayerProps {
   src: string;
   className?: string;
   onTimeUpdate?: (currentTime: number) => void;
-  onJumpToTime?: (time: number) => void;
+  onJumpToTime?: (jumpFunction: (time: number) => void) => void;
   onPlaybackStateChange?: (isPlaying: boolean) => void;
   initialVolume?: number;
 }
