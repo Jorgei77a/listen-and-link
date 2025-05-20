@@ -26,6 +26,8 @@ export function AudioPlayer({
   const audioRef = useRef<HTMLAudioElement>(null);
   const jumpHandledRef = useRef<boolean>(false);
   const lastJumpTimeRef = useRef<number | null>(null);
+  const userInteractionRef = useRef<boolean>(false);
+  const seekingRef = useRef<boolean>(false);
 
   // Toggle play/pause
   const togglePlayPause = () => {
@@ -43,12 +45,14 @@ export function AudioPlayer({
   // Skip forward/backward
   const skipForward = () => {
     if (audioRef.current && ready) {
+      userInteractionRef.current = true;
       audioRef.current.currentTime += 5;
     }
   };
 
   const skipBackward = () => {
     if (audioRef.current && ready) {
+      userInteractionRef.current = true;
       audioRef.current.currentTime -= 5;
     }
   };
@@ -56,9 +60,10 @@ export function AudioPlayer({
   // Handle time updates
   const handleTimeUpdate = () => {
     if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
+      const newTime = audioRef.current.currentTime;
+      setCurrentTime(newTime);
       if (onTimeUpdate) {
-        onTimeUpdate(audioRef.current.currentTime);
+        onTimeUpdate(newTime);
       }
     }
   };
@@ -72,12 +77,26 @@ export function AudioPlayer({
   };
 
   // Handle seeking
+  const handleSeekStart = () => {
+    seekingRef.current = true;
+    userInteractionRef.current = true;
+  };
+
+  const handleSeekEnd = () => {
+    seekingRef.current = false;
+    // Allow time for the currentTime to update
+    setTimeout(() => {
+      userInteractionRef.current = false;
+    }, 200);
+  };
+
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
-    setCurrentTime(time);
     
     if (audioRef.current) {
+      userInteractionRef.current = true;
       audioRef.current.currentTime = time;
+      setCurrentTime(time);
     }
   };
 
@@ -127,26 +146,49 @@ export function AudioPlayer({
 
   // Handle external time jump requests
   useEffect(() => {
-    // Only process if jumpToTime has a value and either:
-    // 1. It's a different time than the last jump we processed OR
-    // 2. We haven't processed any jumps yet
+    // Only process if we have a valid jumpToTime value
     if (jumpToTime !== null && jumpToTime !== undefined && 
-        audioRef.current && ready && 
-        (!jumpHandledRef.current || jumpToTime !== lastJumpTimeRef.current)) {
+        audioRef.current && ready) {
       
-      // Update our refs to track this jump
-      jumpHandledRef.current = true;
-      lastJumpTimeRef.current = jumpToTime;
-      
-      // Set the current time and play
-      audioRef.current.currentTime = jumpToTime;
-      
-      // Always play when jumping to a new time
-      audioRef.current.play().catch(error => {
-        console.error("Audio playback after jump failed:", error);
-      });
+      // Force jump if it's a new request time OR we need to re-jump to the same time
+      const shouldJump = jumpToTime !== lastJumpTimeRef.current || !jumpHandledRef.current;
+
+      if (shouldJump) {
+        console.log(`Jumping to time: ${jumpToTime}`);
+        
+        // Update our refs to track this jump
+        jumpHandledRef.current = true;
+        lastJumpTimeRef.current = jumpToTime;
+        
+        // Set the current time and force an update
+        audioRef.current.currentTime = jumpToTime;
+        setCurrentTime(jumpToTime);
+        
+        // Always play when jumping to a new time
+        audioRef.current.play().catch(error => {
+          console.error("Audio playback after jump failed:", error);
+        });
+      }
     }
   }, [jumpToTime, ready]);
+
+  // Clean up jumpHandledRef whenever jumpToTime changes back to null
+  useEffect(() => {
+    if (jumpToTime === null) {
+      jumpHandledRef.current = false;
+    }
+  }, [jumpToTime]);
+
+  // Make sure audio element stays in sync with our state
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || seekingRef.current || userInteractionRef.current) return;
+
+    // Only update if there's a significant difference to avoid loops
+    if (Math.abs(audio.currentTime - currentTime) > 0.5) {
+      audio.currentTime = currentTime;
+    }
+  }, [currentTime]);
 
   return (
     <div className={cn("flex flex-col space-y-2", className)}>
@@ -206,6 +248,10 @@ export function AudioPlayer({
           max={duration || 0}
           value={currentTime}
           onChange={handleSeek}
+          onMouseDown={handleSeekStart}
+          onMouseUp={handleSeekEnd}
+          onTouchStart={handleSeekStart}
+          onTouchEnd={handleSeekEnd}
           className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
           disabled={!ready}
         />

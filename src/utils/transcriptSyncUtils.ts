@@ -1,4 +1,3 @@
-
 /**
  * Utility functions for synchronizing audio playback with transcript text
  */
@@ -19,9 +18,32 @@ export const findActiveSegment = (
   if (!segments || segments.length === 0) return null;
 
   // Find the segment that contains the current time
-  return segments.find(
+  const activeSegment = segments.find(
     (segment) => currentTime >= segment.start && currentTime <= segment.end
-  ) || null;
+  );
+  
+  // If no segment contains the exact time, find the closest one
+  if (!activeSegment) {
+    // If current time is before the first segment, return the first
+    if (currentTime < segments[0].start) {
+      return segments[0];
+    }
+    
+    // If current time is after the last segment, return the last
+    const lastSegment = segments[segments.length - 1];
+    if (currentTime > lastSegment.end) {
+      return lastSegment;
+    }
+    
+    // Otherwise find the segment we're closest to starting
+    return segments.reduce((closest, segment) => {
+      const currentDiff = Math.abs(currentTime - segment.start);
+      const closestDiff = Math.abs(currentTime - closest.start);
+      return currentDiff < closestDiff ? segment : closest;
+    }, segments[0]);
+  }
+  
+  return activeSegment;
 };
 
 /**
@@ -77,4 +99,22 @@ export const findNextSegment = (
   
   // Find the first segment that starts after the current time
   return sortedSegments.find(segment => segment.start > currentTime) || null;
+};
+
+/**
+ * Calculate an appropriate scroll position based on playback progress within a segment
+ * This provides smoother scrolling that tracks with the audio
+ */
+export const calculateScrollProgress = (
+  currentTime: number,
+  segment: TranscriptSegment
+): number => {
+  if (!segment) return 0;
+  
+  // Calculate how far we are through the current segment (0 to 1)
+  const segmentDuration = segment.end - segment.start;
+  const timeIntoSegment = currentTime - segment.start;
+  
+  // Ensure we stay between 0 and 1
+  return Math.max(0, Math.min(1, segmentDuration > 0 ? timeIntoSegment / segmentDuration : 0));
 };

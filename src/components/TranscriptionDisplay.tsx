@@ -1,5 +1,5 @@
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -54,9 +54,20 @@ const TranscriptionDisplay = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [jumpToTime, setJumpToTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
-  const jumpRequested = useRef<boolean>(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const lastJumpTimeRef = useRef<number>(0);
+  const jumpTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   const displayTitle = customTitle || fileName.split('.')[0];
+
+  // Clear any pending jump timeout when component unmounts
+  useEffect(() => {
+    return () => {
+      if (jumpTimeoutRef.current) {
+        clearTimeout(jumpTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Handle copy button click
   const handleCopy = () => {
@@ -78,27 +89,38 @@ const TranscriptionDisplay = ({
 
   // Handle segment click to jump to specific timestamp
   const handleSegmentClick = (segment: TranscriptSegment) => {
-    // Set a new jump time only if it's different from current time
-    // This ensures that clicks on the same segment will trigger again
-    if (Math.abs(segment.start - currentTime) > 0.1) {
-      setJumpToTime(segment.start);
-      jumpRequested.current = true;
-      
-      // Reset the jump time after a short delay
-      // This allows re-clicking the same segment to jump again
-      setTimeout(() => {
-        setJumpToTime(null);
-      }, 100);
+    // Cancel any pending timeout to reset jumpToTime
+    if (jumpTimeoutRef.current) {
+      clearTimeout(jumpTimeoutRef.current);
+      jumpTimeoutRef.current = null;
     }
+    
+    const now = Date.now();
+    // Prevent rapid-fire clicks (ensure minimal delay between jumps)
+    if (now - lastJumpTimeRef.current < 300) {
+      return;
+    }
+    
+    lastJumpTimeRef.current = now;
+    
+    // First set jumpToTime to null to reset the jump handled state in AudioPlayer
+    setJumpToTime(null);
+    
+    // Then set the new jump time after a short delay to ensure state updates properly
+    setTimeout(() => {
+      setJumpToTime(segment.start);
+      
+      // Reset jumpToTime after a delay so that we can jump to the same segment again if needed
+      jumpTimeoutRef.current = setTimeout(() => {
+        setJumpToTime(null);
+        jumpTimeoutRef.current = null;
+      }, 300);
+    }, 50);
   };
 
   // Handle playback state changes
-  const handlePlaybackStateChange = (isPlaying: boolean) => {
-    // If we just requested a jump and audio is now playing,
-    // we can consider the jump request fulfilled
-    if (isPlaying && jumpRequested.current) {
-      jumpRequested.current = false;
-    }
+  const handlePlaybackStateChange = (playingState: boolean) => {
+    setIsPlaying(playingState);
   };
 
   // Extract statistics from the transcript
@@ -160,6 +182,7 @@ const TranscriptionDisplay = ({
               segments={segments}
               currentTime={currentTime}
               onSegmentClick={handleSegmentClick}
+              isPlaying={isPlaying}
               className="h-[300px]"
             />
           </div>
