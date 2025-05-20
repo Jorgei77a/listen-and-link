@@ -6,11 +6,11 @@
 // Configuration settings for synchronization behavior
 export const SYNC_CONFIG = {
   // How much extra time (in seconds) to play past a segment's end time
-  // before pausing (useful for natural-sounding pauses)
-  segmentEndBuffer: 2,
+  // Increased to allow more natural flow between segments
+  segmentEndBuffer: 4,
   
   // Minimum segment duration (in seconds) to prevent very short segments
-  minSegmentDuration: 2,
+  minSegmentDuration: 3,
   
   // Debounce time for scroll operations (in milliseconds)
   scrollDebounce: 200,
@@ -59,7 +59,7 @@ export const hasReachedSegmentEnd = (
   time: number,
   segment: TranscriptSegment
 ): boolean => {
-  return time >= segment.end;
+  return time >= segment.end + SYNC_CONFIG.segmentEndBuffer;
 };
 
 /**

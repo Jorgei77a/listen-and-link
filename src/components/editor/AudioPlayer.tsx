@@ -23,6 +23,9 @@ interface AudioPlayerProps {
 
 type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'seeking' | 'error';
 
+// Reduce log frequency
+const LOG_THROTTLE_MS = 2000;
+
 export function AudioPlayer({ 
   src, 
   className,
@@ -49,6 +52,19 @@ export function AudioPlayer({
   const playRequestPendingRef = useRef(false);
   const lastKnownTimeRef = useRef(0);
   const userInteractingRef = useRef(false);
+  
+  // Use these to reduce console log frequency
+  const lastLogTimeRef = useRef<Record<string, number>>({});
+  
+  // Throttled logging function to reduce console spam
+  const throttledLog = useCallback((key: string, message: string) => {
+    const now = Date.now();
+    if (!lastLogTimeRef.current[key] || now - lastLogTimeRef.current[key] > LOG_THROTTLE_MS) {
+      // Only log this message if we haven't logged it recently
+      lastLogTimeRef.current[key] = now;
+      // console.log(message);
+    }
+  }, []);
   
   // Clean up function for all timeouts
   const clearAllTimeouts = useCallback(() => {
@@ -106,7 +122,6 @@ export function AudioPlayer({
             playRequestPendingRef.current = false;
           }
         } else {
-          console.log("Audio not playable yet, showing loading state");
           setPlaybackState('loading');
           
           // Clear any existing timeout and set a new one
@@ -119,7 +134,7 @@ export function AudioPlayer({
             playRequestPendingRef.current = false;
             
             if (audioRef.current && audioRef.current.readyState >= 2) {
-              console.log("Retrying play after delay");
+              throttledLog('retryPlay', "Retrying play after delay");
               togglePlayPause();
             } else {
               console.error("Audio still not ready after delay");
@@ -137,13 +152,13 @@ export function AudioPlayer({
         userInteractingRef.current = false;
       }, 300);
     }
-  }, [isPlaying]);
+  }, [isPlaying, throttledLog]);
 
   // Method to explicitly pause the audio
   const pauseAudio = useCallback(() => {
     if (!audioRef.current || !isPlaying) return;
     
-    console.log("Explicitly pausing audio at:", audioRef.current.currentTime);
+    throttledLog('pauseAudio', "Explicitly pausing audio");
     audioRef.current.pause();
     setIsPlaying(false);
     setPlaybackState('paused');
@@ -151,7 +166,7 @@ export function AudioPlayer({
     if (onPlaybackStateChange) {
       onPlaybackStateChange(false);
     }
-  }, [isPlaying, onPlaybackStateChange]);
+  }, [isPlaying, onPlaybackStateChange, throttledLog]);
 
   // Skip forward/backward helpers
   const skipForward = useCallback(() => {
@@ -180,7 +195,7 @@ export function AudioPlayer({
     }, 300);
   }, []);
 
-  // Update time handler
+  // Update time handler - reduce frequency of updates
   const handleTimeUpdate = useCallback(() => {
     if (!audioRef.current || timeUpdateLockRef.current) return;
     
@@ -191,14 +206,17 @@ export function AudioPlayer({
     lastTimeUpdateRef.current = Date.now();
     lastKnownTimeRef.current = currentTimeValue;
     
-    // Update the UI display
-    setCurrentTime(currentTimeValue);
+    // Update the UI display only when time has changed significantly
+    if (Math.abs(currentTime - currentTimeValue) > 0.2) {
+      setCurrentTime(currentTimeValue);
+    }
     
-    // Notify external components
+    // Notify external components but limit the frequency 
+    // Don't send updates during user interactions or seeking
     if (onTimeUpdate && !seekingRef.current && !userInteractingRef.current) {
       onTimeUpdate(currentTimeValue);
     }
-  }, [onTimeUpdate]);
+  }, [currentTime, onTimeUpdate]);
 
   // Handle metadata loaded
   const handleLoadedMetadata = useCallback(() => {
@@ -212,12 +230,12 @@ export function AudioPlayer({
     audioRef.current.volume = volume;
     audioRef.current.muted = muted;
     
-    console.log(`Audio metadata loaded. Duration: ${audioDuration}s`);
-  }, [volume, muted]);
+    throttledLog('metadata', `Audio metadata loaded. Duration: ${audioDuration}s`);
+  }, [volume, muted, throttledLog]);
 
   // Handler for when audio can be played
   const handleCanPlay = useCallback(() => {
-    console.log('Audio can play now');
+    throttledLog('canPlay', 'Audio can play now');
     
     if (playRequestPendingRef.current) {
       // If we were waiting to play, try again now
@@ -234,7 +252,7 @@ export function AudioPlayer({
         }
       }
     }
-  }, [isPlaying]);
+  }, [isPlaying, throttledLog]);
 
   // Handle user scrubbing the timeline
   const handleSeek = useCallback((value: number[]) => {
@@ -332,7 +350,7 @@ export function AudioPlayer({
   const jumpToTime = useCallback((time: number) => {
     if (!audioRef.current) return;
     
-    console.log(`Jumping to time: ${time}s`);
+    throttledLog('jumpToTime', `Jumping to time: ${time}s`);
     userInteractingRef.current = true;
     
     // Lock time updates during the jump
@@ -379,7 +397,7 @@ export function AudioPlayer({
         onSegmentBoundaryReached(boundedTime);
       }
     }, 300);
-  }, [isPlaying, onTimeUpdate, onSegmentBoundaryReached]);
+  }, [isPlaying, onTimeUpdate, onSegmentBoundaryReached, throttledLog]);
 
   // Handle volume change
   const handleVolumeChange = useCallback((value: number[]) => {
@@ -426,8 +444,9 @@ export function AudioPlayer({
       jumpToTime(time);
     });
     
-    return () => {}; 
-  }, [onJumpToTime, jumpToTime]);
+    // We only want to set this up once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Effect to handle audio element events
   useEffect(() => {
@@ -511,7 +530,6 @@ export function AudioPlayer({
       : Volume2;
 
   // Expose methods to parent component
-  // This is a new addition to control audio from parent
   useEffect(() => {
     // Nothing to expose if there's no onSegmentBoundaryReached handler
     if (!onSegmentBoundaryReached) return;

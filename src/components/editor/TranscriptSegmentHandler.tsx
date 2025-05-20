@@ -48,8 +48,6 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
                 // Store element key to track which segment is active
                 const segmentKey = paragraph.getKey();
                 
-                console.log(`Segment clicked with time: ${start}s`);
-                
                 // Remove highlight from previous active element
                 if (activeElementRef.current && activeElementRef.current !== element) {
                   activeElementRef.current.classList.remove('bg-primary/20');
