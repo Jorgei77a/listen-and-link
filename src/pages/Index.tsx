@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -50,6 +51,9 @@ const Index = () => {
   useEffect(() => {
     if (!currentTranscriptionId) return;
     
+    // Using let so we can clear the interval from within checkTranscription
+    let intervalId: NodeJS.Timeout | null = null;
+    
     const checkTranscription = async () => {
       try {
         const { data, error } = await supabase
@@ -60,6 +64,7 @@ const Index = () => {
         
         if (error) {
           console.error('Failed to fetch transcription:', error);
+          if (intervalId) clearInterval(intervalId); // Clear on error
           return;
         }
         
@@ -82,85 +87,90 @@ const Index = () => {
           };
           
           if (transcriptionData.status === 'completed' && transcriptionData.transcript) {
-            setTranscript(transcriptionData.transcript);
-            setIsProcessing(false);
-            
-            // Parse segments if available - note that segments may not exist in database yet
-            let parsedSegments: TranscriptionSegment[] = [];
-            
-            // Parse the segments from the JSON data if available
-            if (transcriptionData.segments) {
-              try {
-                if (Array.isArray(transcriptionData.segments)) {
-                  // Convert Json array to TranscriptionSegment array
-                  parsedSegments = transcriptionData.segments.map((segment: any) => ({
-                    start: Number(segment.start),
-                    end: Number(segment.end),
-                    text: String(segment.text)
-                  }));
-                }
-              } catch (segmentError) {
-                console.error('Error parsing segments:', segmentError);
-              }
-            }
-            
-            // If no valid segments could be parsed, generate basic segments from the transcript
-            if (parsedSegments.length === 0 && transcriptionData.transcript) {
-              console.log('No segments found or error parsing, generating basic segments from transcript');
-              
-              // Simple sentence splitting for segments when no timestamp data is available
-              const sentences = transcriptionData.transcript.split(/(?<=[.!?])\s+/).filter(Boolean);
-              let currentTime = 0;
-              const avgTimePerSentence = transcriptionData.audio_duration ? 
-                Math.max(1, transcriptionData.audio_duration / sentences.length) : 3;
-              
-              parsedSegments = sentences.map((sentence, index) => {
-                const segmentStart = currentTime;
-                currentTime += avgTimePerSentence;
-                return {
-                  start: segmentStart,
-                  end: currentTime,
-                  text: sentence.trim()
-                };
-              });
-            }
-            
-            setSegments(parsedSegments);
-            
-            // Create signed URL for the audio file
-            if (transcriptionData.file_path) {
-              const { data: signedUrl } = await supabase.storage
-                .from('audio_files')
-                .createSignedUrl(transcriptionData.file_path, 3600); // 1 hour expiry
-                
-              if (signedUrl?.signedUrl) {
-                setAudioUrl(signedUrl.signedUrl);
-              }
-            }
-            
-            // Store the audio duration - make sure to round it here
-            if (transcriptionData.audio_duration) {
-              // Round to nearest integer to ensure no decimal places
-              const roundedDuration = Math.round(Number(transcriptionData.audio_duration));
-              setAudioDuration(roundedDuration);
-              
-              // Update monthly usage with the actual audio duration from the server
-              try {
-                await updateMonthlyUsage(roundedDuration);
-                console.log(`Updated usage with confirmed duration: ${roundedDuration}s`);
-              } catch (error) {
-                console.error('Failed to update usage with confirmed duration:', error);
-              }
-            }
-            
-            // Only show completion toast if we haven't already
             if (!transcriptionCompleted) {
+              setTranscript(transcriptionData.transcript);
+              setIsProcessing(false);
+              
+              // Parse segments if available - note that segments may not exist in database yet
+              let parsedSegments: TranscriptionSegment[] = [];
+              
+              // Parse the segments from the JSON data if available
+              if (transcriptionData.segments) {
+                try {
+                  if (Array.isArray(transcriptionData.segments)) {
+                    // Convert Json array to TranscriptionSegment array
+                    parsedSegments = transcriptionData.segments.map((segment: any) => ({
+                      start: Number(segment.start),
+                      end: Number(segment.end),
+                      text: String(segment.text)
+                    }));
+                  }
+                } catch (segmentError) {
+                  console.error('Error parsing segments:', segmentError);
+                }
+              }
+              
+              // If no valid segments could be parsed, generate basic segments from the transcript
+              if (parsedSegments.length === 0 && transcriptionData.transcript) {
+                console.log('No segments found or error parsing, generating basic segments from transcript');
+                
+                // Simple sentence splitting for segments when no timestamp data is available
+                const sentences = transcriptionData.transcript.split(/(?<=[.!?])\s+/).filter(Boolean);
+                let currentTime = 0;
+                const avgTimePerSentence = transcriptionData.audio_duration ? 
+                  Math.max(1, transcriptionData.audio_duration / sentences.length) : 3;
+                
+                parsedSegments = sentences.map((sentence, index) => {
+                  const segmentStart = currentTime;
+                  currentTime += avgTimePerSentence;
+                  return {
+                    start: segmentStart,
+                    end: currentTime,
+                    text: sentence.trim()
+                  };
+                });
+              }
+              
+              setSegments(parsedSegments);
+              
+              // Create signed URL for the audio file - do this only once
+              if (transcriptionData.file_path && !audioUrl) {
+                const { data: signedUrl } = await supabase.storage
+                  .from('audio_files')
+                  .createSignedUrl(transcriptionData.file_path, 3600); // 1 hour expiry
+                  
+                if (signedUrl?.signedUrl) {
+                  setAudioUrl(signedUrl.signedUrl);
+                }
+              }
+              
+              // Store the audio duration - make sure to round it here
+              if (transcriptionData.audio_duration) {
+                // Round to nearest integer to ensure no decimal places
+                const roundedDuration = Math.round(Number(transcriptionData.audio_duration));
+                setAudioDuration(roundedDuration);
+                
+                // Update monthly usage with the actual audio duration from the server
+                try {
+                  await updateMonthlyUsage(roundedDuration);
+                  console.log(`Updated usage with confirmed duration: ${roundedDuration}s`);
+                } catch (error) {
+                  console.error('Failed to update usage with confirmed duration:', error);
+                }
+              }
+              
               toast.success("Transcription complete!");
               setTranscriptionCompleted(true);
             }
+            
+            // Stop polling once we've completed processing the transcription
+            if (intervalId) clearInterval(intervalId);
+            
           } else if (transcriptionData.status === 'failed') {
             setIsProcessing(false);
             toast.error(`Transcription failed: ${transcriptionData.error || 'Unknown error'}`);
+            // Stop polling on failure
+            if (intervalId) clearInterval(intervalId);
           } else if (transcriptionData.progress_message) {
             // Show progress messages if available
             console.log(`Transcription progress: ${transcriptionData.progress_message}`);
@@ -168,12 +178,23 @@ const Index = () => {
         }
       } catch (error) {
         console.error('Error checking transcription status:', error);
+        // Stop polling on exception
+        if (intervalId) clearInterval(intervalId);
       }
     };
     
-    const intervalId = setInterval(checkTranscription, 3000);
-    return () => clearInterval(intervalId);
-  }, [currentTranscriptionId, transcriptionCompleted, updateMonthlyUsage]);
+    // Check immediately first
+    checkTranscription();
+    
+    // Only start interval if the transcription isn't already completed
+    if (!transcriptionCompleted) {
+      intervalId = setInterval(checkTranscription, 3000);
+    }
+    
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [currentTranscriptionId, transcriptionCompleted, updateMonthlyUsage, audioUrl]);
 
   const handleFileUpload = async (file: File, transcriptionId?: string, title?: string) => {
     setIsProcessing(true);
