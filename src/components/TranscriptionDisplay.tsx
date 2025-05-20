@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -93,6 +94,7 @@ const TranscriptionDisplay = ({
   }, []);
 
   // Set up the jump to time handler that will be passed to the editor
+  // Updated to correctly handle the function signature
   const handleJumpToTimeSetup = useCallback((jumpHandler: (time: number) => void) => {
     console.log("Jump to time handler set up");
     setJumpToTimeHandler(() => jumpHandler);

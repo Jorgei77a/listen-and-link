@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -78,7 +79,10 @@ export function AudioPlayer({
         console.log('Potential stall detected - time updates stopped while playing');
         
         // Don't reset to 0 - preserve last known position
-        audio.currentTime = Math.max(currentTime, lastKnownTimeRef.current);
+        if (Math.abs(audio.currentTime - lastKnownTimeRef.current) > 2) {
+          // Only update if the difference is significant to avoid constant resets
+          audio.currentTime = Math.max(currentTime, lastKnownTimeRef.current);
+        }
         
         // Force a time update to at least show the correct position
         setCurrentTime(audio.currentTime);
@@ -108,8 +112,8 @@ export function AudioPlayer({
     // Handle the case where time got reset to 0 incorrectly
     if (audio.currentTime === 0 && lastKnownTimeRef.current > 0 && !userInteractingRef.current) {
       // Only restore if this wasn't due to reaching the end or user interaction
-      if (!audio.ended && playbackState !== 'seeking' && !seekingRef.current) {
-        console.log('Restoring position from last known time');
+      if (!audio.ended && playbackState !== 'seeking' && !seekingRef.current && !userInteractingRef.current) {
+        console.log('Restoring position from last known time:', lastKnownTimeRef.current);
         audio.currentTime = lastKnownTimeRef.current;
         setCurrentTime(lastKnownTimeRef.current);
       }

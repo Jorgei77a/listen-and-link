@@ -48,7 +48,13 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
                 
                 // Call the callback with the start time
                 if (onSegmentClick) {
-                  onSegmentClick(start);
+                  // Prevent event bubbling that might cause additional issues
+                  e.stopPropagation();
+                  
+                  // Add a small delay to ensure proper event handling
+                  setTimeout(() => {
+                    onSegmentClick(start);
+                  }, 10);
                 }
                 
                 // Show visual feedback
