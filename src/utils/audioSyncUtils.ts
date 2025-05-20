@@ -6,12 +6,12 @@
 export const SYNC_CONFIG = {
   // Buffer time (in seconds) to add after each segment's end time
   // This prevents abrupt cutoffs and allows smoother transitions
-  // Increased from 5 to 8 seconds for better listening experience
-  segmentEndBuffer: 8,
+  // Increased from 8 to 12 seconds for better listening experience
+  segmentEndBuffer: 12,
   
   // Minimum segment duration (in seconds) to prevent very short segments
-  // Increased from 1 to 2 seconds to ensure minimal playback time
-  minSegmentDuration: 2,
+  // Increased from 2 to 4 seconds to ensure minimal playback time
+  minSegmentDuration: 4,
   
   // Debounce time for scroll operations (in milliseconds)
   scrollDebounce: 200,
@@ -20,7 +20,8 @@ export const SYNC_CONFIG = {
   transitionThreshold: 1.5,
   
   // Minimum time (in seconds) to stay on a segment after clicking
-  minSegmentPlaybackDuration: 3
+  // Increased from 3 to 8 seconds to prevent early resets
+  minSegmentPlaybackDuration: 8
 };
 
 /**

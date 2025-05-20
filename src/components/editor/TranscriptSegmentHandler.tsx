@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { $getRoot } from "lexical";
 import { toast } from "sonner";
@@ -14,6 +14,8 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
   const clickHandlersSetupRef = useRef(false);
   const lastClickTimeRef = useRef(0);
   const lastClickPositionRef = useRef(-1);
+  const activeElementRef = useRef<HTMLElement | null>(null);
+  const [activeSegmentKey, setActiveSegmentKey] = useState<string | null>(null);
   
   // Set up click handler for paragraphs with timestamps
   const setupClickHandlers = useCallback(() => {
@@ -39,7 +41,7 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
           // Only add click handler if we have valid time data
           if (start >= 0) {
             // Make it visibly clickable
-            element.classList.add('cursor-pointer', 'hover:bg-muted/50', 'transition-colors');
+            element.classList.add('cursor-pointer', 'hover:bg-primary/10', 'transition-colors');
             
             // Add click handler if it doesn't already have one
             if (!element.hasAttribute('data-has-click-handler')) {
@@ -47,9 +49,12 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
                 // Don't trigger if the user is selecting text
                 if (window.getSelection()?.toString()) return;
                 
+                // Store element key to track which segment is active
+                const segmentKey = paragraph.getKey();
+                
                 // Prevent double-clicks or rapid clicks (debounce)
                 const now = Date.now();
-                if (now - lastClickTimeRef.current < 500 && start === lastClickPositionRef.current) {
+                if (now - lastClickTimeRef.current < 800 && start === lastClickPositionRef.current) {
                   console.log("Ignoring rapid repeated click on same segment");
                   return;
                 }
@@ -59,6 +64,15 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
                 lastClickPositionRef.current = start;
                 
                 console.log(`Segment clicked with time: ${start}s`);
+                
+                // Remove highlight from previous active element
+                if (activeElementRef.current && activeElementRef.current !== element) {
+                  activeElementRef.current.classList.remove('bg-primary/20');
+                }
+                
+                // Update active element reference
+                activeElementRef.current = element as HTMLElement;
+                setActiveSegmentKey(segmentKey);
                 
                 // Call the callback with the start time
                 if (onSegmentClick) {
@@ -71,11 +85,11 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
                   }, 50);
                 }
                 
-                // Show visual feedback
+                // Show visual feedback - persist highlight for longer duration
                 element.classList.add('bg-primary/20');
-                setTimeout(() => {
-                  element.classList.remove('bg-primary/20');
-                }, 300);
+                
+                // Don't remove the highlight immediately - it will stay until another segment is clicked
+                // or until clearActiveSegmentHighlight is called
               });
               
               // Mark as having a click handler
@@ -94,6 +108,15 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
       }
     });
   }, [editor, onSegmentClick]);
+  
+  // Clear active segment highlight when needed
+  const clearActiveSegmentHighlight = useCallback(() => {
+    if (activeElementRef.current) {
+      activeElementRef.current.classList.remove('bg-primary/20');
+      activeElementRef.current = null;
+      setActiveSegmentKey(null);
+    }
+  }, []);
   
   // Effect to set up click handlers when the editor is ready
   useEffect(() => {
@@ -116,6 +139,8 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
   
   return {
     setupClickHandlers,
-    refreshClickHandlers
+    refreshClickHandlers,
+    clearActiveSegmentHighlight,
+    activeSegmentKey
   };
 }

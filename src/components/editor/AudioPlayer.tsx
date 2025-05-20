@@ -119,13 +119,24 @@ export function AudioPlayer({
     if (audio.currentTime === 0 && lastKnownTimeRef.current > 0 && !userInteractingRef.current) {
       // Check if we're within minimum play duration time after a segment jump
       const timeSinceSegmentJump = now - segmentJumpTimeRef.current;
+      
+      // We've modified this to be more strict about when to reset
+      // Only restore position if ALL these conditions are met:
+      // 1. The audio isn't ended (real end of file)
+      // 2. We're not in seeking state
+      // 3. User isn't manually interacting
+      // 4. We're outside the minimum segment playback duration (to prevent early resets)
+      // 5. The last known time is significant (more than 1 second)
       const isWithinMinPlayDuration = segmentJumpTimeRef.current > 0 && 
-                                    timeSinceSegmentJump < SYNC_CONFIG.minSegmentPlaybackDuration * 1000;
+                                    timeSinceSegmentJump < (SYNC_CONFIG.minSegmentPlaybackDuration * 1000);
                                     
-      // Only restore if this wasn't due to reaching the end or user interaction
-      if (!audio.ended && playbackState !== 'seeking' && !seekingRef.current && 
-          !userInteractingRef.current && !isWithinMinPlayDuration) {
-        console.log('Restoring position from last known time:', lastKnownTimeRef.current);
+      if (!audio.ended && 
+          playbackState !== 'seeking' && 
+          !seekingRef.current && 
+          !userInteractingRef.current && 
+          !isWithinMinPlayDuration && 
+          lastKnownTimeRef.current > 1) {
+        console.log('Preventing reset to 0: Restoring position from last known time:', lastKnownTimeRef.current);
         audio.currentTime = lastKnownTimeRef.current;
         setCurrentTime(lastKnownTimeRef.current);
       }
@@ -331,7 +342,7 @@ export function AudioPlayer({
       timeUpdateLockRef.current = false;
       userInteractingRef.current = false;
       
-      // Update the playback state based on whether we were playing before
+      // Update playback state based on whether we were playing before
       setPlaybackState(isPlaying ? 'playing' : 'paused');
       
       // If we were playing, make sure we're still playing
@@ -420,6 +431,7 @@ export function AudioPlayer({
     }
     
     // Set a timeout to enforce minimum playback duration for a segment
+    // This is crucial for preventing early resets
     minPlayDurationTimeoutRef.current = window.setTimeout(() => {
       console.log(`Minimum segment playback duration (${SYNC_CONFIG.minSegmentPlaybackDuration}s) completed`);
       minPlayDurationTimeoutRef.current = null;
@@ -496,9 +508,10 @@ export function AudioPlayer({
   // Effect to set up continuous state checking for reliability
   useEffect(() => {
     // Start a periodic check for state consistency
+    // IMPORTANT FIX: Reduced frequency from 1000ms to 2000ms to decrease console spam
     stateCheckIntervalRef.current = window.setInterval(() => {
       checkAndRecoverPlayback();
-    }, 1000);
+    }, 2000);
     
     return () => {
       if (stateCheckIntervalRef.current) {
