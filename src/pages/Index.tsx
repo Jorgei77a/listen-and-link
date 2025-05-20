@@ -18,7 +18,6 @@ const Index = () => {
   const [customTitle, setCustomTitle] = useState<string>("");
   const [transcriptionCompleted, setTranscriptionCompleted] = useState(false);
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   
   const { updateMonthlyUsage } = useSubscription();
 
@@ -40,9 +39,7 @@ const Index = () => {
       
       if (data) {
         if (data.status === 'completed' && data.transcript) {
-          // Format the transcript with proper paragraph breaks
-          const formattedTranscript = formatTranscriptText(data.transcript);
-          setTranscript(formattedTranscript);
+          setTranscript(data.transcript);
           setIsProcessing(false);
           
           // Store the audio duration - make sure to round it here
@@ -79,42 +76,12 @@ const Index = () => {
     return () => clearInterval(intervalId);
   }, [currentTranscriptionId, transcriptionCompleted, updateMonthlyUsage]);
 
-  // Helper function to format transcript text into proper paragraphs
-  const formatTranscriptText = (text: string): string => {
-    if (!text) return "";
-    
-    // Format text with paragraph breaks for better readability
-    let formatted = text
-      // Normalize line endings
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n')
-      
-      // Add paragraph breaks after sentences that end with a period followed by a capital letter
-      .replace(/([.!?])\s+([A-Z])/g, '$1\n\n$2')
-      
-      // Add paragraph breaks before speaker changes
-      .replace(/([a-z])\s+([A-Z][a-z]+):\s*/g, '$1\n\n$2: ')
-      
-      // Preserve timestamps if they exist
-      .replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, '[$1] ')
-      
-      // Clean up excessive line breaks
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-      
-    return formatted;
-  };
-
   const handleFileUpload = async (file: File, transcriptionId?: string, title?: string) => {
     setIsProcessing(true);
     setCurrentFileName(file.name);
     setCustomTitle(title || file.name.split('.')[0]);
     setTranscriptionCompleted(false);
     setAudioDuration(null);
-    
-    // Create and store URL for the audio file
-    const audioObjectUrl = URL.createObjectURL(file);
-    setAudioUrl(audioObjectUrl);
     
     if (transcriptionId) {
       setCurrentTranscriptionId(transcriptionId);
@@ -128,12 +95,6 @@ const Index = () => {
     setCustomTitle("");
     setTranscriptionCompleted(false);
     setAudioDuration(null);
-    
-    // Clean up object URL to prevent memory leaks
-    if (audioUrl) {
-      URL.revokeObjectURL(audioUrl);
-      setAudioUrl(null);
-    }
   };
 
   return (
@@ -160,7 +121,6 @@ const Index = () => {
               fileName={currentFileName}
               customTitle={customTitle}
               audioDuration={audioDuration}
-              audioUrl={audioUrl}
               onReset={handleReset} 
             />
           ) : (

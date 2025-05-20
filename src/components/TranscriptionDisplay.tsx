@@ -1,81 +1,41 @@
-
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { 
-  Download, 
-  Lock, 
-  Clock, 
-  FileText
-} from "lucide-react";
+import { Download, Lock, Clock, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import ReactMarkdown from "react-markdown";
 import { useSubscription } from "@/context/SubscriptionContext";
+import { Badge } from "@/components/ui/badge";
 import { FeatureGate } from "@/components/FeatureGate";
-import TranscriptEditor from "./TranscriptEditor";
-import TranscriptAudioPlayer from "./TranscriptAudioPlayer";
-import { convertPlainTextToTiptapJSON } from "@/utils/editorUtils";
-import { 
-  formatAudioDuration, 
-  extractTimestamps, 
-  TranscriptSegment,
-  findSegmentAtPosition
-} from "@/utils/audioUtils";
 
 interface TranscriptionDisplayProps {
   transcript: string;
   fileName: string;
   customTitle?: string;
   audioDuration?: number | null;
-  audioUrl?: string | null;
   onReset: () => void;
 }
 
 /**
- * Format raw transcript text with improved paragraph detection
- * - Add proper paragraph breaks at sentence endings
+ * Format transcript text to improve readability
+ * - Add proper paragraph breaks
  * - Format potential speaker labels
- * - Preserve potential timestamps
- * - Split text into logical paragraphs based on content
+ * - Convert timestamps to markdown format
  */
-const formatTextWithParagraphs = (text: string): string => {
+const formatTranscript = (text: string): string => {
   if (!text) return "";
   
-  // First, normalize line breaks
-  let formatted = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  
-  // If the text already has paragraph breaks, respect them
-  if (formatted.includes('\n\n')) {
-    return formatted.trim();
-  }
-  
-  // Otherwise, add paragraph breaks after sentences for better readability
-  formatted = formatted
-    // Add paragraph breaks after sentences with typical ending patterns
-    .replace(/([.!?])\s+([A-Z])/g, '$1\n\n$2')
+  // Add line breaks after sentences
+  let formatted = text
+    // Add paragraph breaks after sentences (periods followed by spaces)
+    .replace(/\.\s+/g, '.\n\n')
     // Format potential speaker labels (NAME: text)
-    .replace(/([A-Z][a-z]+):\s*/g, '\n\n$1: ')
-    // Preserve timestamps ([00:00:00]) 
-    .replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, '[$1] ');
+    .replace(/([A-Z][a-z]+):\s+/g, '\n\n**$1**: ')
+    // Format potential timestamps ([00:00:00])
+    .replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, '\n\n*[$1]* ');
 
-  // Split long paragraphs (more than 3 sentences) for better readability
-  const paragraphs = formatted.split('\n\n');
-  const enhancedParagraphs = paragraphs.map(paragraph => {
-    // Count sentences in this paragraph
-    const sentenceCount = (paragraph.match(/[.!?]/g) || []).length;
-    
-    if (sentenceCount > 3 && paragraph.length > 300) {
-      // If it's a long paragraph, add more breaks after sentences
-      return paragraph.replace(/([.!?])\s+/g, '$1\n\n');
-    }
-    return paragraph;
-  });
-  
-  // Join paragraphs back together
-  formatted = enhancedParagraphs.join('\n\n');
-  
   // Clean up excessive line breaks
   formatted = formatted
     .replace(/\n{3,}/g, '\n\n') // Replace 3+ line breaks with just 2
@@ -84,43 +44,45 @@ const formatTextWithParagraphs = (text: string): string => {
   return formatted;
 };
 
+/**
+ * Format audio duration into a human-readable string
+ * @param seconds - Duration in seconds
+ * @returns Formatted string like "8 mins 20 secs" or "45 secs"
+ */
+const formatAudioDuration = (seconds: number | null): string => {
+  if (seconds === null || seconds === undefined) return "";
+  
+  // Force conversion to number, then round to nearest integer to eliminate decimals
+  const totalSeconds = Math.round(Number(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+  
+  if (minutes === 0) {
+    return `${remainingSeconds} ${remainingSeconds === 1 ? 'sec' : 'secs'}`;
+  } else if (remainingSeconds === 0) {
+    return `${minutes} ${minutes === 1 ? 'min' : 'mins'}`;
+  } else {
+    return `${minutes} ${minutes === 1 ? 'min' : 'mins'} ${remainingSeconds} ${remainingSeconds === 1 ? 'sec' : 'secs'}`;
+  }
+};
+
 const TranscriptionDisplay = ({ 
   transcript, 
   fileName, 
   customTitle = "", 
   audioDuration = null,
-  audioUrl = null,
   onReset 
 }: TranscriptionDisplayProps) => {
   const [copied, setCopied] = useState(false);
-  // Store HTML content from Tiptap
-  const [editedContent, setEditedContent] = useState<string>("");
-  const [segments, setSegments] = useState<TranscriptSegment[]>([]);
-  const [activeTab, setActiveTab] = useState<string>("editor");
   const displayTitle = customTitle || fileName.split('.')[0];
-  
-  // Process the raw transcript and create initial Tiptap JSON content
-  const formattedText = formatTextWithParagraphs(transcript);
-  // Convert to Tiptap JSON for proper paragraph blocks
-  const editorInitialContent = convertPlainTextToTiptapJSON(transcript);
-
-  // Initialize segments and edited content
-  useEffect(() => {
-    // Extract any timestamps from the transcript for audio sync
-    const extractedSegments = extractTimestamps(transcript);
-    setSegments(extractedSegments);
-  }, [transcript]);
+  const formattedTranscript = formatTranscript(transcript);
 
   // Get subscription information
   const { getTierLimits, currentTier } = useSubscription();
   const availableFormats = getTierLimits('exportFormats');
 
   const handleCopy = () => {
-    // Copy the edited content from Tiptap (HTML) as plain text
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = editedContent;
-    navigator.clipboard.writeText(tempDiv.textContent || transcript);
-    
+    navigator.clipboard.writeText(transcript);
     setCopied(true);
     toast.success("Transcript copied to clipboard!");
     setTimeout(() => setCopied(false), 2000);
@@ -142,18 +104,9 @@ const TranscriptionDisplay = ({
       return;
     }
     
-    // For plain text export, convert HTML to plain text
-    let textToDownload = transcript; // Default to original transcript
-    
-    if (editedContent) {
-      // Convert HTML to plain text if we have edited content
-      const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = editedContent;
-      textToDownload = tempDiv.textContent || transcript;
-    }
-    
-    // File extension is always txt since we're not using Markdown anymore
-    const fileExtension = 'txt';
+    // Decide which text to download
+    const textToDownload = format === 'plain' ? transcript : formattedTranscript;
+    const fileExtension = format === 'plain' ? 'txt' : 'md';
     
     const element = document.createElement("a");
     const file = new Blob([textToDownload], { type: "text/plain" });
@@ -162,34 +115,14 @@ const TranscriptionDisplay = ({
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
-    toast.success(`Transcript downloaded as text!`);
-  };
-
-  const handleEditorChange = (html: string) => {
-    setEditedContent(html);
-  };
-  
-  const handleTextClick = (event: MouseEvent, position: number) => {
-    // Find the segment containing the clicked position and seek to its timestamp
-    const segment = findSegmentAtPosition(segments, position);
-    if (segment?.startTime) {
-      // We would use onSeek here to update the audio player
-      console.log(`Seeking to timestamp: ${segment.startTime}s`);
-    }
-  };
-  
-  const handleAudioTimeUpdate = (currentTime: number) => {
-    // This would be used to highlight the current segment being played
-    console.log(`Audio time updated: ${currentTime}s`);
-  };
-
-  // Handle tab changes to preserve editor state
-  const handleTabChange = (value: string) => {
-    setActiveTab(value);
+    toast.success(`Transcript downloaded as ${format === 'plain' ? 'text' : 'markdown'}!`);
   };
 
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
-  const paragraphs = formattedText.split(/\n\s*\n/).filter(Boolean).length;
+  const paragraphs = formattedTranscript.split(/\n\s*\n/).filter(Boolean).length;
+
+  // Format audio duration as a user-friendly string - ensure we're explicitly rounding here
+  const formattedDuration = audioDuration !== null ? formatAudioDuration(audioDuration) : null;
 
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-lg">
@@ -212,24 +145,22 @@ const TranscriptionDisplay = ({
                 <div className="py-1">
                   <button 
                     onClick={() => handleDownload('plain')} 
-                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                   >
-                    <FileText className="w-3 h-3 mr-1" />
                     Plain Text (.txt)
                   </button>
                   
                   {availableFormats.includes('markdown') ? (
                     <button 
-                      onClick={() => handleDownload('plain')} 
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                      onClick={() => handleDownload('markdown')} 
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                     >
-                      <FileText className="w-3 h-3 mr-1" />
-                      Text with Formatting (.txt)
+                      Markdown (.md)
                     </button>
                   ) : (
                     <div className="block w-full text-left px-4 py-2 text-sm text-gray-400 bg-gray-50 flex items-center">
                       <Lock className="w-3 h-3 mr-1" />
-                      Text with Formatting (.txt)
+                      Markdown (.md)
                       <Badge className="ml-1 text-[10px]" variant="outline">Pro+</Badge>
                     </div>
                   )}
@@ -254,13 +185,13 @@ const TranscriptionDisplay = ({
             <span className="font-medium">File:</span>
             <span className="ml-1 truncate max-w-[200px]">{fileName}</span>
           </div>
-          {audioDuration && (
+          {formattedDuration && (
             <>
               <Separator orientation="vertical" className="h-4" />
               <div className="flex items-center">
                 <span className="font-medium">Duration:</span>
                 <span className="ml-1 flex items-center">
-                  {formatAudioDuration(audioDuration)}
+                  {formattedDuration}
                   <Badge variant="secondary" className="ml-1 text-xs h-5 px-1 py-0" title="Duration confirmed by transcription service">
                     <Clock className="w-3 h-3 mr-1" /> Confirmed
                   </Badge>
@@ -270,31 +201,16 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
-        <Tabs defaultValue="editor" value={activeTab} onValueChange={handleTabChange}>
+        <Tabs defaultValue="formatted">
           <TabsList className="mb-4">
-            <TabsTrigger value="editor">Editor</TabsTrigger>
+            <TabsTrigger value="formatted">Formatted</TabsTrigger>
             <TabsTrigger value="plain">Plain Text</TabsTrigger>
           </TabsList>
-          
-          <TabsContent value="editor">
-            <TranscriptEditor 
-              content={editorInitialContent}
-              onChange={handleEditorChange}
-              onTextClick={handleTextClick}
-            />
-            
-            <FeatureGate
-              featureKey="audio_player"
-              description="Audio playback is available on all plans"
-            >
-              <TranscriptAudioPlayer 
-                fileName={fileName}
-                audioUrl={audioUrl || undefined}
-                onTimeUpdate={handleAudioTimeUpdate}
-              />
-            </FeatureGate>
+          <TabsContent value="formatted">
+            <div className="bg-muted p-4 rounded-lg max-h-[400px] overflow-y-auto prose prose-sm max-w-none">
+              <ReactMarkdown>{formattedTranscript}</ReactMarkdown>
+            </div>
           </TabsContent>
-          
           <TabsContent value="plain">
             <div className="bg-muted p-4 rounded-lg max-h-[400px] overflow-y-auto">
               <pre className="whitespace-pre-wrap font-sans text-sm">

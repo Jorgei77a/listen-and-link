@@ -1,11 +1,10 @@
-
 import * as React from "react"
 import * as PopoverPrimitive from "@radix-ui/react-popover"
 
 import { cn } from "@/lib/utils"
 
-// Fix to prevent the hook usage error
-const PopoverRoot = PopoverPrimitive.Root
+const Popover = PopoverPrimitive.Root
+
 const PopoverTrigger = PopoverPrimitive.Trigger
 
 const PopoverContent = React.forwardRef<
@@ -26,8 +25,5 @@ const PopoverContent = React.forwardRef<
   </PopoverPrimitive.Portal>
 ))
 PopoverContent.displayName = PopoverPrimitive.Content.displayName
-
-// Fix: Use the correct Root component
-const Popover = PopoverRoot
 
 export { Popover, PopoverTrigger, PopoverContent }
