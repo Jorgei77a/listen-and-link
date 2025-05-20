@@ -4,8 +4,6 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Heading from '@tiptap/extension-heading'
 import Underline from '@tiptap/extension-underline'
-import BulletList from '@tiptap/extension-bullet-list'
-import ListItem from '@tiptap/extension-list-item'
 import { Button } from '@/components/ui/button'
 import {
   Bold,
@@ -28,14 +26,14 @@ interface TranscriptEditorProps {
 
 const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorProps) => {
   const [isMounted, setIsMounted] = useState(false)
+  const [initialContent] = useState(content) // Store initial content to prevent re-initialization
 
   const editor = useEditor({
     extensions: [
       StarterKit,
       Heading.configure({ levels: [1, 2, 3] }),
       Underline,
-      BulletList,
-      ListItem,
+      // BulletList and ListItem are already included in StarterKit, so we don't add them again
     ],
     content: content,
     editorProps: {
@@ -54,22 +52,20 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
         onChange(editor.getHTML())
       }
     },
+    autofocus: true, // Auto-focus the editor on load
   })
 
   useEffect(() => {
     setIsMounted(true)
   }, [])
 
-  // Update editor content when the content prop changes
+  // Only update editor content on initial mount, not on every re-render
   useEffect(() => {
-    if (editor && content) {
-      // Only update if content differs to avoid cursor position issues
-      const currentContent = editor.getHTML()
-      if (currentContent !== content) {
-        editor.commands.setContent(content)
-      }
+    if (editor && content && !editor.isDestroyed && initialContent !== content) {
+      // Only update if editor is active and content has changed from initial value
+      editor.commands.setContent(content)
     }
-  }, [content, editor])
+  }, [editor, initialContent]) // Removed content from dependency array to prevent re-updates
 
   if (!isMounted) {
     return null

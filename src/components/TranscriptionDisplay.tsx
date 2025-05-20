@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -68,15 +69,18 @@ const TranscriptionDisplay = ({
   const [copied, setCopied] = useState(false);
   const [editedContent, setEditedContent] = useState<string>("");
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
+  const [activeTab, setActiveTab] = useState<string>("editor");
   const displayTitle = customTitle || fileName.split('.')[0];
   
   // Process the raw transcript with basic paragraph formatting only
   const formattedText = formatTextWithParagraphs(transcript);
 
-  // Initialize edited content from formatted transcript
+  // Initialize edited content from formatted transcript only on first load
   useEffect(() => {
-    // Initialize the editor with formatted text - no Markdown conversion
-    setEditedContent(formattedText);
+    // Initialize the editor with formatted text only if editedContent is empty
+    if (!editedContent) {
+      setEditedContent(formattedText);
+    }
     
     // Extract any timestamps from the transcript for audio sync
     const extractedSegments = extractTimestamps(transcript);
@@ -153,6 +157,11 @@ const TranscriptionDisplay = ({
   const handleAudioTimeUpdate = (currentTime: number) => {
     // This would be used to highlight the current segment being played
     console.log(`Audio time updated: ${currentTime}s`);
+  };
+
+  // Handle tab changes to preserve editor state
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
   };
 
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
@@ -237,7 +246,7 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
-        <Tabs defaultValue="editor">
+        <Tabs defaultValue="editor" value={activeTab} onValueChange={handleTabChange}>
           <TabsList className="mb-4">
             <TabsTrigger value="editor">Editor</TabsTrigger>
             <TabsTrigger value="plain">Plain Text</TabsTrigger>
@@ -245,7 +254,7 @@ const TranscriptionDisplay = ({
           
           <TabsContent value="editor">
             <TranscriptEditor 
-              content={formattedText}
+              content={editedContent || formattedText}
               onChange={handleEditorChange}
               onTextClick={handleTextClick}
             />
