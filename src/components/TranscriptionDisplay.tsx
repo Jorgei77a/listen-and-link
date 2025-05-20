@@ -32,23 +32,48 @@ interface TranscriptionDisplayProps {
 }
 
 /**
- * Format raw transcript text with basic paragraphs for readability
- * - Add proper paragraph breaks
+ * Format raw transcript text with improved paragraph detection
+ * - Add proper paragraph breaks at sentence endings
  * - Format potential speaker labels
  * - Preserve potential timestamps
+ * - Split text into logical paragraphs based on content
  */
 const formatTextWithParagraphs = (text: string): string => {
   if (!text) return "";
   
-  // Add basic paragraph structure for readability
-  let formatted = text
-    // Add paragraph breaks after sentences (periods followed by spaces)
-    .replace(/\.\s+/g, '.\n\n')
+  // First, normalize line breaks
+  let formatted = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  
+  // If the text already has paragraph breaks, respect them
+  if (formatted.includes('\n\n')) {
+    return formatted.trim();
+  }
+  
+  // Otherwise, add paragraph breaks after sentences for better readability
+  formatted = formatted
+    // Add paragraph breaks after sentences with typical ending patterns
+    .replace(/([.!?])\s+([A-Z])/g, '$1\n\n$2')
     // Format potential speaker labels (NAME: text)
-    .replace(/([A-Z][a-z]+):\s+/g, '$1: ')
+    .replace(/([A-Z][a-z]+):\s*/g, '\n\n$1: ')
     // Preserve timestamps ([00:00:00]) 
     .replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, '[$1] ');
 
+  // Split long paragraphs (more than 3 sentences) for better readability
+  const paragraphs = formatted.split('\n\n');
+  const enhancedParagraphs = paragraphs.map(paragraph => {
+    // Count sentences in this paragraph
+    const sentenceCount = (paragraph.match(/[.!?]/g) || []).length;
+    
+    if (sentenceCount > 3 && paragraph.length > 300) {
+      // If it's a long paragraph, add more breaks after sentences
+      return paragraph.replace(/([.!?])\s+/g, '$1\n\n');
+    }
+    return paragraph;
+  });
+  
+  // Join paragraphs back together
+  formatted = enhancedParagraphs.join('\n\n');
+  
   // Clean up excessive line breaks
   formatted = formatted
     .replace(/\n{3,}/g, '\n\n') // Replace 3+ line breaks with just 2

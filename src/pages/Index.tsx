@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -40,7 +39,9 @@ const Index = () => {
       
       if (data) {
         if (data.status === 'completed' && data.transcript) {
-          setTranscript(data.transcript);
+          // Format the transcript with proper paragraph breaks
+          const formattedTranscript = formatTranscriptText(data.transcript);
+          setTranscript(formattedTranscript);
           setIsProcessing(false);
           
           // Store the audio duration - make sure to round it here
@@ -76,6 +77,32 @@ const Index = () => {
     const intervalId = setInterval(checkTranscription, 3000);
     return () => clearInterval(intervalId);
   }, [currentTranscriptionId, transcriptionCompleted, updateMonthlyUsage]);
+
+  // Helper function to format transcript text with proper paragraphs
+  const formatTranscriptText = (text: string): string => {
+    if (!text) return "";
+    
+    // Format text with paragraph breaks for better readability
+    let formatted = text
+      // Normalize line endings
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      
+      // Add paragraph breaks after sentences that end with a period followed by a capital letter
+      .replace(/([.!?])\s+([A-Z])/g, '$1\n\n$2')
+      
+      // Add paragraph breaks before speaker changes
+      .replace(/([a-z])\s+([A-Z][a-z]+):\s*/g, '$1\n\n$2: ')
+      
+      // Preserve timestamps if they exist
+      .replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, '[$1] ')
+      
+      // Clean up excessive line breaks
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+      
+    return formatted;
+  };
 
   const handleFileUpload = async (file: File, transcriptionId?: string, title?: string) => {
     setIsProcessing(true);

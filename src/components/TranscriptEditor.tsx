@@ -86,6 +86,32 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
         margin-bottom: 0.25em;
         color: #444;
       }
+      
+      /* Make formatting actions more visible */
+      .editor-headings strong {
+        font-weight: 700;
+        color: #111;
+      }
+      .editor-headings em {
+        font-style: italic;
+        color: #333;
+      }
+      .editor-headings u {
+        text-decoration: underline;
+        text-decoration-thickness: 0.1em;
+      }
+      
+      /* Enhance paragraph spacing */
+      .editor-headings p {
+        margin-top: 0.5em;
+        margin-bottom: 0.5em;
+      }
+      
+      /* Add visual indication for the active cursor block */
+      .editor-headings .has-focus {
+        background-color: rgba(59, 130, 246, 0.05);
+        border-radius: 0.25rem;
+      }
     `
     document.head.appendChild(style)
     
@@ -119,7 +145,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
     }
   }
 
-  // Improved MenuButton component with more reliable focus handling
+  // Fixed MenuButton component that ensures the editor is focused before each command
   const MenuButton = ({ 
     onClick, 
     active = false,
@@ -133,13 +159,17 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
     tooltip?: string,
     children: React.ReactNode 
   }) => {
-    // Fix for double-click issue: ensure focus is maintained between clicks
+    // Fix for double-click issue: directly focus the editor before executing command
     const handleButtonClick = () => {
       if (editor && !editor.isDestroyed) {
-        // First ensure editor has focus
-        editor.commands.focus()
-        // Then execute the command
-        onClick()
+        // First ensure editor has focus before running any command
+        editor.commands.focus();
+        
+        // Small timeout to ensure focus is fully applied
+        setTimeout(() => {
+          // Then execute the command
+          onClick();
+        }, 10);
       }
     }
     
@@ -198,6 +228,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           <MenuButton 
             onClick={() => editor.chain().toggleBold().run()}
             active={editor.isActive('bold')}
+            tooltip="Bold (applies to selected text)"
           >
             <Bold className="h-4 w-4" />
           </MenuButton>
@@ -205,6 +236,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           <MenuButton 
             onClick={() => editor.chain().toggleItalic().run()}
             active={editor.isActive('italic')}
+            tooltip="Italic (applies to selected text)"
           >
             <Italic className="h-4 w-4" />
           </MenuButton>
@@ -212,6 +244,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           <MenuButton 
             onClick={() => editor.chain().toggleUnderline().run()}
             active={editor.isActive('underline')}
+            tooltip="Underline (applies to selected text)"
           >
             <UnderlineIcon className="h-4 w-4" />
           </MenuButton>
@@ -247,6 +280,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           <MenuButton 
             onClick={() => editor.chain().toggleBulletList().run()}
             active={editor.isActive('bulletList')}
+            tooltip="Bullet List (applies to whole paragraph)"
           >
             <List className="h-4 w-4" />
           </MenuButton>
@@ -254,15 +288,17 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           <div className="w-px h-full mx-1 bg-border" />
           
           <MenuButton 
-            onClick={() => editor.chain().undo().run()}
+            onClick={() => editor.commands.undo()}
             disabled={!editor.can().undo()}
+            tooltip="Undo"
           >
             <Undo className="h-4 w-4" />
           </MenuButton>
           
           <MenuButton 
-            onClick={() => editor.chain().redo().run()}
+            onClick={() => editor.commands.redo()}
             disabled={!editor.can().redo()}
+            tooltip="Redo"
           >
             <Redo className="h-4 w-4" />
           </MenuButton>
