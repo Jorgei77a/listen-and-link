@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useState, useCallback } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
@@ -22,7 +23,6 @@ import {
 } from "lexical";
 import { cn } from "@/lib/utils";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
-import { SEGMENT_TIMING, findActiveSegment, isSegmentActive } from "@/utils/audioUtils";
 
 interface LexicalEditorProps {
   initialText: string;
@@ -162,22 +162,14 @@ function InitializeContent({
 // Component to handle timestamp highlighting based on current audio time
 function TimestampHighlighter({ 
   currentTimeInSeconds, 
-  onSegmentClick,
-  segments
+  onSegmentClick 
 }: { 
   currentTimeInSeconds?: number | null;
   onSegmentClick?: (time: number) => void;
-  segments?: Array<{start: number; end: number; text: string;}>;
 }) {
   const [editor] = useLexicalComposerContext();
   const lastHighlightedRef = useRef<HTMLElement | null>(null);
-  const segmentsRef = useRef(segments || []);
   
-  // Update segments ref when segments prop changes
-  useEffect(() => {
-    segmentsRef.current = segments || [];
-  }, [segments]);
-
   useEffect(() => {
     if (!editor) return;
     
@@ -227,69 +219,71 @@ function TimestampHighlighter({
   }, [editor, onSegmentClick]);
 
   useEffect(() => {
-    if (!currentTimeInSeconds || !editor || !segments || segments.length === 0) return;
-    
-    if (SEGMENT_TIMING.DEBUG) {
-      console.log('TimestampHighlighter: Current time =', currentTimeInSeconds);
-    }
-    
-    // Use our utility function to find the active segment
-    const activeSegmentIndex = findActiveSegment(currentTimeInSeconds, segmentsRef.current);
+    if (!currentTimeInSeconds || !editor) return;
     
     editor.update(() => {
       const root = $getRoot();
       const paragraphs = root.getChildren();
+      let activeElementFound = false;
       
-      // If no active segment was found, clear any highlighting
-      if (activeSegmentIndex === null) {
-        if (lastHighlightedRef.current) {
-          lastHighlightedRef.current.classList.remove('bg-primary/10', 'active-segment');
-          lastHighlightedRef.current = null;
-        }
-        return;
-      }
-      
-      // Only update DOM if we have an active segment that matches a paragraph
-      if (activeSegmentIndex >= 0 && activeSegmentIndex < paragraphs.length) {
-        const paragraph = paragraphs[activeSegmentIndex];
+      paragraphs.forEach((paragraph) => {
         const element = editor.getElementByKey(paragraph.getKey());
-        
         if (!element) return;
         
-        // Only highlight and scroll if this is a new element
-        if (lastHighlightedRef.current !== element) {
-          // Remove highlight from previous element
-          if (lastHighlightedRef.current) {
-            lastHighlightedRef.current.classList.remove('bg-primary/10', 'active-segment');
+        // Check if this paragraph has timestamp data attributes
+        const start = parseFloat(element.getAttribute('data-start') || '0');
+        const end = parseFloat(element.getAttribute('data-end') || '0');
+        
+        if (start <= currentTimeInSeconds && currentTimeInSeconds <= end) {
+          activeElementFound = true;
+          
+          // Only highlight and scroll if this is a new element
+          if (lastHighlightedRef.current !== element) {
+            // Remove highlight from previous element
+            if (lastHighlightedRef.current) {
+              lastHighlightedRef.current.classList.remove('bg-primary/10', 'active-segment');
+            }
+            
+            // Add highlight to current element
+            element.classList.add('bg-primary/10', 'active-segment', 'transition-colors');
+            lastHighlightedRef.current = element;
+            
+            // Scroll into view if needed
+            const editorContainer = editor.getRootElement()?.closest('.relative.bg-muted\\/30.rounded-md');
+            if (!editorContainer) return;
+            
+            const containerRect = editorContainer.getBoundingClientRect();
+            const elementRect = element.getBoundingClientRect();
+            
+            // Check if element is outside the visible area of the container
+            const isOutOfView = 
+              elementRect.top < containerRect.top || 
+              elementRect.bottom > containerRect.bottom;
+            
+            if (isOutOfView) {
+              // Use smooth scrolling to avoid jarring transitions
+              element.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'center'
+              });
+            }
           }
-          
-          // Add highlight to current element
-          element.classList.add('bg-primary/10', 'active-segment', 'transition-colors');
-          lastHighlightedRef.current = element;
-          
-          // Scroll into view if needed
-          const editorContainer = editor.getRootElement()?.closest('.relative.bg-muted\\/30.rounded-md');
-          if (!editorContainer) return;
-          
-          const containerRect = editorContainer.getBoundingClientRect();
-          const elementRect = element.getBoundingClientRect();
-          
-          // Check if element is outside the visible area of the container
-          const isOutOfView = 
-            elementRect.top < containerRect.top || 
-            elementRect.bottom > containerRect.bottom;
-          
-          if (isOutOfView) {
-            // Use smooth scrolling to avoid jarring transitions
-            element.scrollIntoView({ 
-              behavior: 'smooth', 
-              block: 'center'
-            });
+        } else {
+          // Only remove highlighting if this element was previously highlighted
+          if (lastHighlightedRef.current === element) {
+            element.classList.remove('bg-primary/10', 'active-segment');
+            lastHighlightedRef.current = null;
           }
         }
+      });
+      
+      // If no active element was found, clear the previous highlight
+      if (!activeElementFound && lastHighlightedRef.current) {
+        lastHighlightedRef.current.classList.remove('bg-primary/10', 'active-segment');
+        lastHighlightedRef.current = null;
       }
     });
-  }, [currentTimeInSeconds, editor, segments]);
+  }, [currentTimeInSeconds, editor]);
   
   return null;
 }
@@ -410,8 +404,7 @@ export function LexicalEditor({
         {currentTimeInSeconds !== undefined && (
           <TimestampHighlighter 
             currentTimeInSeconds={currentTimeInSeconds}
-            onSegmentClick={onSegmentClick}
-            segments={segments}
+            onSegmentClick={onSegmentClick} 
           />
         )}
         
