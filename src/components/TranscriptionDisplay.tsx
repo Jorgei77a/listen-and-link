@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -56,18 +55,8 @@ const TranscriptionDisplay = ({
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const lastJumpTimeRef = useRef<number>(0);
-  const jumpTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   const displayTitle = customTitle || fileName.split('.')[0];
-
-  // Clear any pending jump timeout when component unmounts
-  useEffect(() => {
-    return () => {
-      if (jumpTimeoutRef.current) {
-        clearTimeout(jumpTimeoutRef.current);
-      }
-    };
-  }, []);
 
   // Handle copy button click
   const handleCopy = () => {
@@ -89,33 +78,17 @@ const TranscriptionDisplay = ({
 
   // Handle segment click to jump to specific timestamp
   const handleSegmentClick = (segment: TranscriptSegment) => {
-    // Cancel any pending timeout to reset jumpToTime
-    if (jumpTimeoutRef.current) {
-      clearTimeout(jumpTimeoutRef.current);
-      jumpTimeoutRef.current = null;
-    }
-    
     const now = Date.now();
-    // Prevent rapid-fire clicks (ensure minimal delay between jumps)
-    if (now - lastJumpTimeRef.current < 300) {
+    // Debounce clicks to prevent rapid-fire jumps if desired
+    if (now - lastJumpTimeRef.current < 200) { 
+      console.log("Segment click debounced");
       return;
     }
-    
     lastJumpTimeRef.current = now;
-    
-    // First set jumpToTime to null to reset the jump handled state in AudioPlayer
-    setJumpToTime(null);
-    
-    // Then set the new jump time after a short delay to ensure state updates properly
-    setTimeout(() => {
-      setJumpToTime(segment.start);
-      
-      // Reset jumpToTime after a delay so that we can jump to the same segment again if needed
-      jumpTimeoutRef.current = setTimeout(() => {
-        setJumpToTime(null);
-        jumpTimeoutRef.current = null;
-      }, 300);
-    }, 50);
+
+    console.log(`TranscriptionDisplay: Setting jumpToTime to ${segment.start}`);
+    setJumpToTime(segment.start);
+    // No longer setting jumpToTime to null here.
   };
 
   // Handle playback state changes
