@@ -22,8 +22,7 @@ import {
   REDO_COMMAND
 } from "lexical";
 import { $setBlocksType } from "@lexical/selection";
-import { $createHeadingNode } from "@lexical/rich-text";
-import { HeadingTagType } from "@lexical/rich-text";
+import { $createHeadingNode, HeadingTagType } from "@lexical/rich-text";
 import { 
   INSERT_UNORDERED_LIST_COMMAND, 
   INSERT_ORDERED_LIST_COMMAND, 
@@ -50,7 +49,8 @@ export function EditorToolbar() {
     editor.update(() => {
       const selection = $getSelection();
       if ($isRangeSelection(selection)) {
-        $setBlocksType(selection, () => $createHeadingNode(headingSize));
+        // Using the explicit assertion to ensure type compatibility
+        $setBlocksType(selection as any, () => $createHeadingNode(headingSize));
       }
     });
   }, [editor]);

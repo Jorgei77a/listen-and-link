@@ -35,10 +35,9 @@ const Index = () => {
     
     const checkTranscription = async () => {
       try {
-        // Add {count: "exact"} to get data even if there's a column missing
         const { data, error } = await supabase
           .from('transcriptions')
-          .select('*', { count: "exact" })
+          .select('*')
           .eq('id', currentTranscriptionId)
           .single();
         
@@ -52,24 +51,45 @@ const Index = () => {
             setTranscript(data.transcript);
             setIsProcessing(false);
             
-            // Parse segments if available
+            // Parse segments if available - note that segments may not exist in database yet
             let parsedSegments: TranscriptionSegment[] = [];
             
-            // Handle segments data if it exists in the database
-            try {
-              if (data.segments) {
-                if (typeof data.segments === 'string') {
-                  parsedSegments = JSON.parse(data.segments);
-                } else if (Array.isArray(data.segments)) {
-                  parsedSegments = data.segments;
-                }
+            // We'll generate basic segments from the transcript since the database doesn't have segments
+            if (!data.hasOwnProperty('segments')) {
+              console.log('Segments field not found in database, generating basic segments from transcript');
+              
+              // Simple sentence splitting for segments when no timestamp data is available
+              if (data.transcript) {
+                const sentences = data.transcript.split(/(?<=[.!?])\s+/).filter(Boolean);
+                let currentTime = 0;
+                const avgTimePerSentence = data.audio_duration ? Math.max(1, data.audio_duration / sentences.length) : 3;
+                
+                parsedSegments = sentences.map((sentence, index) => {
+                  const segmentStart = currentTime;
+                  currentTime += avgTimePerSentence;
+                  return {
+                    start: segmentStart,
+                    end: currentTime,
+                    text: sentence.trim()
+                  };
+                });
               }
-              setSegments(parsedSegments);
-            } catch (error) {
-              console.error('Failed to parse segments:', error);
-              // Set empty segments array if parsing fails
-              setSegments([]);
+            } else {
+              // If segments exist in the future, parse them here
+              try {
+                if (data.segments) {
+                  if (typeof data.segments === 'string') {
+                    parsedSegments = JSON.parse(data.segments);
+                  } else if (Array.isArray(data.segments)) {
+                    parsedSegments = data.segments;
+                  }
+                }
+              } catch (error) {
+                console.error('Failed to parse segments:', error);
+              }
             }
+            
+            setSegments(parsedSegments);
             
             // Create signed URL for the audio file
             if (data.file_path) {
