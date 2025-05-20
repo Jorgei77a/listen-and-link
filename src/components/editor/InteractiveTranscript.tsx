@@ -23,6 +23,7 @@ export function InteractiveTranscript({
 }: InteractiveTranscriptProps) {
   const [activeSegment, setActiveSegment] = useState<TranscriptSegment | null>(null);
   const segmentRefs = useRef<Map<number, HTMLParagraphElement>>(new Map());
+  const lastClickTimeRef = useRef<number>(0);
 
   // Find and set the active segment based on current time
   useEffect(() => {
@@ -37,9 +38,23 @@ export function InteractiveTranscript({
   useEffect(() => {
     if (activeSegment) {
       const activeElement = segmentRefs.current.get(activeSegment.start);
-      scrollElementIntoView(activeElement || null);
+      
+      // Only scroll if we haven't clicked recently (to avoid fighting with user scrolling)
+      const timeSinceLastClick = Date.now() - lastClickTimeRef.current;
+      if (timeSinceLastClick > 1000) { // 1 second threshold
+        scrollElementIntoView(activeElement || null);
+      }
     }
   }, [activeSegment]);
+
+  // Handle segment click with debounce to prevent double-processing
+  const handleSegmentClick = (segment: TranscriptSegment) => {
+    // Update last click time
+    lastClickTimeRef.current = Date.now();
+    
+    // Call the parent handler
+    onSegmentClick(segment);
+  };
 
   return (
     <ScrollArea className={className || "h-[400px]"}>
@@ -55,7 +70,7 @@ export function InteractiveTranscript({
               }}
               className={`p-2 rounded transition-colors cursor-pointer 
                 ${isActive ? 'bg-primary/10 border-l-4 border-primary pl-3' : 'hover:bg-muted/50'}`}
-              onClick={() => onSegmentClick(segment)}
+              onClick={() => handleSegmentClick(segment)}
               title={`Start: ${formatTime(segment.start)}`}
             >
               {segment.text}

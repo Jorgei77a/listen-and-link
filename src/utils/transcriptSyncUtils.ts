@@ -61,3 +61,20 @@ export const isSameSegment = (
   
   return segment1.start === segment2.start && segment1.end === segment2.end;
 };
+
+/**
+ * Finds the next segment after the current time
+ * Useful for preparing for transitions
+ */
+export const findNextSegment = (
+  currentTime: number,
+  segments: TranscriptSegment[]
+): TranscriptSegment | null => {
+  if (!segments || segments.length === 0) return null;
+  
+  // Sort segments by start time to ensure we find the correct next segment
+  const sortedSegments = [...segments].sort((a, b) => a.start - b.start);
+  
+  // Find the first segment that starts after the current time
+  return sortedSegments.find(segment => segment.start > currentTime) || null;
+};

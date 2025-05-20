@@ -24,7 +24,8 @@ export function AudioPlayer({
   const [duration, setDuration] = useState(0);
   const [ready, setReady] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const jumpRequestedRef = useRef<boolean>(false);
+  const jumpHandledRef = useRef<boolean>(false);
+  const lastJumpTimeRef = useRef<number | null>(null);
 
   // Toggle play/pause
   const togglePlayPause = () => {
@@ -126,11 +127,21 @@ export function AudioPlayer({
 
   // Handle external time jump requests
   useEffect(() => {
-    if (jumpToTime !== null && jumpToTime !== undefined && audioRef.current && ready) {
-      audioRef.current.currentTime = jumpToTime;
-      jumpRequestedRef.current = true;
+    // Only process if jumpToTime has a value and either:
+    // 1. It's a different time than the last jump we processed OR
+    // 2. We haven't processed any jumps yet
+    if (jumpToTime !== null && jumpToTime !== undefined && 
+        audioRef.current && ready && 
+        (!jumpHandledRef.current || jumpToTime !== lastJumpTimeRef.current)) {
       
-      // Immediately play when a jump is requested
+      // Update our refs to track this jump
+      jumpHandledRef.current = true;
+      lastJumpTimeRef.current = jumpToTime;
+      
+      // Set the current time and play
+      audioRef.current.currentTime = jumpToTime;
+      
+      // Always play when jumping to a new time
       audioRef.current.play().catch(error => {
         console.error("Audio playback after jump failed:", error);
       });
