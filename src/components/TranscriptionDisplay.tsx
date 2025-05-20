@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -10,6 +11,7 @@ import { AudioPlayer } from "@/components/editor/AudioPlayer";
 import { InteractiveTranscript } from "@/components/editor/InteractiveTranscript";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
 import { TranscriptSegment } from "@/utils/transcriptSyncUtils";
+import { LexicalEditor } from "@/components/editor/LexicalEditor";
 
 interface TranscriptionDisplayProps {
   transcript: string;
@@ -172,6 +174,17 @@ const TranscriptionDisplay = ({
             />
           </div>
         )}
+        
+        {/* Lexical Editor for transcript editing */}
+        <div className="mt-6 mb-6">
+          <h3 className="text-lg font-medium mb-2">Edit Transcript</h3>
+          <LexicalEditor
+            initialText={transcript}
+            segments={segments}
+            onEditorMount={handleEditorMount}
+            currentTimeInSeconds={currentTime}
+          />
+        </div>
         
         <div className="mt-6 text-center">
           <Button onClick={onReset}>Transcribe Another File</Button>
