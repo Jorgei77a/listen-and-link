@@ -1,8 +1,7 @@
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import Heading from '@tiptap/extension-heading'
 import Underline from '@tiptap/extension-underline'
 import { Button } from '@/components/ui/button'
 import {
@@ -27,13 +26,18 @@ interface TranscriptEditorProps {
 const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorProps) => {
   const [isMounted, setIsMounted] = useState(false)
   const [initialContent] = useState(content) // Store initial content to prevent re-initialization
-
+  const editorRef = useRef<HTMLDivElement>(null)
+  
   const editor = useEditor({
     extensions: [
-      StarterKit,
-      Heading.configure({ levels: [1, 2, 3] }),
+      StarterKit.configure({
+        heading: {
+          levels: [1, 2, 3],
+        },
+        // Configure other StarterKit extensions if needed
+      }),
       Underline,
-      // BulletList and ListItem are already included in StarterKit, so we don't add them again
+      // No need to add BulletList and ListItem as they're already in StarterKit
     ],
     content: content,
     editorProps: {
@@ -52,20 +56,38 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
         onChange(editor.getHTML())
       }
     },
-    autofocus: true, // Auto-focus the editor on load
+    autofocus: 'end', // Focus at the end of content
   })
 
+  // Ensure the editor gets mounted
   useEffect(() => {
     setIsMounted(true)
   }, [])
+  
+  // Explicitly focus editor after mount
+  useEffect(() => {
+    if (editor && isMounted && !editor.isDestroyed) {
+      setTimeout(() => {
+        editor.commands.focus('end')
+      }, 100)
+    }
+  }, [editor, isMounted])
 
   // Only update editor content on initial mount, not on every re-render
   useEffect(() => {
     if (editor && content && !editor.isDestroyed && initialContent !== content) {
       // Only update if editor is active and content has changed from initial value
       editor.commands.setContent(content)
+      editor.commands.focus('end')
     }
   }, [editor, initialContent]) // Removed content from dependency array to prevent re-updates
+
+  // Ensure we focus editor when clicking on its container 
+  const handleContainerClick = () => {
+    if (editor && !editor.isDestroyed) {
+      editor.commands.focus()
+    }
+  }
 
   if (!isMounted) {
     return null
@@ -99,7 +121,11 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
   }
 
   return (
-    <div className="border rounded-md overflow-hidden bg-card">
+    <div 
+      className="border rounded-md overflow-hidden bg-card"
+      onClick={handleContainerClick}
+      ref={editorRef}
+    >
       {editor && (
         <div className="border-b p-1 flex flex-wrap gap-0.5 bg-muted/30">
           <MenuButton 
