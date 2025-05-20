@@ -61,12 +61,13 @@ const TranscriptionDisplay = ({
   const [editorReady, setEditorReady] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   
-  // Refs to prevent infinite loops and throttle updates
+  // Stable refs to prevent infinite loops
   const audioPlayerCallbackRef = useRef<((time: number) => void) | null>(null);
   const lastSegmentClickTimeRef = useRef<number>(0);
-  const lastTimeUpdateRef = useRef<number>(0);
-  const isUpdatingTimeRef = useRef<boolean>(false);
+  const isUpdatingFromPlayerRef = useRef<boolean>(false);
+  const isUpdatingFromEditorRef = useRef<boolean>(false);
   const currentTimeRef = useRef<number | null>(currentTime);
+  const isFirstTimeUpdateRef = useRef<boolean>(true);
   
   // Keep currentTimeRef in sync
   useEffect(() => {
@@ -92,60 +93,74 @@ const TranscriptionDisplay = ({
     // Handle editor changes if needed
   }, []);
 
-  // Throttled time update handler with loop prevention
+  // Stabilized time update handler from AudioPlayer with heavy debounce
   const handleTimeUpdate = useCallback((time: number) => {
-    // Prevent rapid updates
-    if (Date.now() - lastTimeUpdateRef.current < 100) return;
-    lastTimeUpdateRef.current = Date.now();
+    // Skip first update as it's often triggered on load with time=0
+    if (isFirstTimeUpdateRef.current) {
+      isFirstTimeUpdateRef.current = false;
+      return;
+    }
     
-    // Prevent setting the same time
-    if (currentTimeRef.current !== null && Math.abs(time - currentTimeRef.current) < 0.1) return;
+    // Prevent updates while editor is sending time updates to player
+    if (isUpdatingFromEditorRef.current) return;
     
-    // Prevent recursive updates
-    if (isUpdatingTimeRef.current) return;
+    // Signal that we're updating from player
+    isUpdatingFromPlayerRef.current = true;
     
-    isUpdatingTimeRef.current = true;
-    setCurrentTime(time);
+    // Only update if the time has actually changed
+    if (currentTimeRef.current === null || Math.abs((currentTimeRef.current || 0) - time) > 0.5) {
+      setCurrentTime(time);
+    }
     
-    // Release lock after a small delay
+    // Reset the lock after a delay
     setTimeout(() => {
-      isUpdatingTimeRef.current = false;
-    }, 50);
+      isUpdatingFromPlayerRef.current = false;
+    }, 300);
   }, []);
 
-  // Debounced segment click handler
+  // Heavily debounced segment click handler
   const handleSegmentClick = useCallback((time: number) => {
-    // Simple debounce for rapid clicks
+    // Prevent multiple rapid clicks or updates while player is updating editor
+    if (isUpdatingFromPlayerRef.current) return;
+    
+    // Simple strong debounce for rapid clicks
     const now = Date.now();
-    if (now - lastSegmentClickTimeRef.current < 500) {
+    if (now - lastSegmentClickTimeRef.current < 1000) {
       return;
     }
     lastSegmentClickTimeRef.current = now;
     
-    // Prevent recursive updates
-    if (isUpdatingTimeRef.current) return;
+    // Signal that we're updating from editor
+    isUpdatingFromEditorRef.current = true;
     
-    isUpdatingTimeRef.current = true;
-    setCurrentTime(time);
-    
-    // Call the audio player's jumpToTime function
-    if (audioPlayerCallbackRef.current) {
-      audioPlayerCallbackRef.current(time);
+    // Only update if there's actually a change
+    if (currentTimeRef.current === null || Math.abs((currentTimeRef.current || 0) - time) > 0.2) {
+      setCurrentTime(time);
+      
+      // Call the audio player's jumpToTime function with delay to ensure state is updated
+      setTimeout(() => {
+        if (audioPlayerCallbackRef.current) {
+          audioPlayerCallbackRef.current(time);
+        }
+      }, 50);
     }
     
-    // Release lock after a small delay
+    // Reset the lock after a delay
     setTimeout(() => {
-      isUpdatingTimeRef.current = false;
-    }, 100);
+      isUpdatingFromEditorRef.current = false;
+    }, 300);
   }, []);
 
   // Register the jump-to-time callback with cleanup
   const handleJumpToTimeRegistration = useCallback((callback: (time: number) => void) => {
+    // Store the callback in a stable ref that won't change
     audioPlayerCallbackRef.current = callback;
     setPlayerReady(true);
     
+    // Return cleanup function
     return () => {
       audioPlayerCallbackRef.current = null;
+      setPlayerReady(false);
     };
   }, []);
 

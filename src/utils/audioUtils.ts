@@ -24,13 +24,14 @@ export const getAudioDuration = (file: File): Promise<number> => {
       return;
     }
     
-    const audioContext = new AudioContext();
+    // Create a new context for each file to avoid issues with suspended contexts
+    let audioContext: AudioContext | null = new AudioContext();
     
     // Create file reader to read the file as ArrayBuffer
     const reader = new FileReader();
     
     reader.onload = (event) => {
-      if (!event.target?.result) {
+      if (!event.target?.result || !audioContext) {
         reject(new Error('Failed to read file'));
         return;
       }
@@ -45,8 +46,9 @@ export const getAudioDuration = (file: File): Promise<number> => {
           resolve(duration);
           
           // Close the audio context to free resources
-          if (audioContext.state !== 'closed') {
+          if (audioContext && audioContext.state !== 'closed') {
             audioContext.close();
+            audioContext = null;
           }
         },
         (error) => {
@@ -56,8 +58,9 @@ export const getAudioDuration = (file: File): Promise<number> => {
           console.log('Using estimated duration due to decode error:', estimatedDuration);
           resolve(estimatedDuration);
           
-          if (audioContext.state !== 'closed') {
+          if (audioContext && audioContext.state !== 'closed') {
             audioContext.close();
+            audioContext = null;
           }
         }
       );
@@ -68,6 +71,12 @@ export const getAudioDuration = (file: File): Promise<number> => {
       // Fallback to estimation on read error
       const estimatedDuration = estimateAudioDuration(file);
       resolve(estimatedDuration);
+      
+      // Clean up the context
+      if (audioContext && audioContext.state !== 'closed') {
+        audioContext.close();
+        audioContext = null;
+      }
     };
     
     // Read the file as an ArrayBuffer

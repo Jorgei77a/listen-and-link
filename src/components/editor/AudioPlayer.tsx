@@ -32,15 +32,26 @@ export function AudioPlayer({
   const lastTimeUpdateRef = useRef(0);
   const timeUpdateThrottleRef = useRef(false);
   const prevTimeRef = useRef(0);
+  
+  // Stable references for event callbacks and props
   const srcRef = useRef(src);
   const onTimeUpdateRef = useRef(onTimeUpdate);
   const lastReportedTimeRef = useRef(-1);
+  const updateLockRef = useRef(false);
+  const audioLoadedRef = useRef(false);
   
-  // Update refs when props change
+  // Stabilize references when props change, but don't trigger effects
   useEffect(() => {
-    srcRef.current = src;
     onTimeUpdateRef.current = onTimeUpdate;
-  }, [src, onTimeUpdate]);
+  }, [onTimeUpdate]);
+
+  // Only update source ref if the actual source string changes
+  useEffect(() => {
+    if (src !== srcRef.current) {
+      srcRef.current = src;
+      audioLoadedRef.current = false;
+    }
+  }, [src]);
 
   // Memoized toggle play/pause to prevent recreating on every render
   const togglePlayPause = useCallback(() => {
@@ -56,7 +67,7 @@ export function AudioPlayer({
 
   // Separated play logic
   const playAudio = useCallback(() => {
-    if (!audioRef.current) return;
+    if (!audioRef.current || !audioLoadedRef.current) return;
     
     // Handle buffering state
     if (audioRef.current.readyState < 3) {
@@ -81,14 +92,14 @@ export function AudioPlayer({
 
   // Memoized skip functions
   const skipForward = useCallback(() => {
-    if (audioRef.current) {
+    if (audioRef.current && !updateLockRef.current) {
       const newTime = Math.min(audioRef.current.currentTime + 5, duration);
       jumpToTime(newTime);
     }
   }, [duration]);
 
   const skipBackward = useCallback(() => {
-    if (audioRef.current) {
+    if (audioRef.current && !updateLockRef.current) {
       const newTime = Math.max(audioRef.current.currentTime - 5, 0);
       jumpToTime(newTime);
     }
@@ -96,9 +107,9 @@ export function AudioPlayer({
 
   // Revised jumpToTime function with better state management
   const jumpToTime = useCallback((time: number) => {
-    if (!audioRef.current) return;
+    if (!audioRef.current || updateLockRef.current || !audioLoadedRef.current) return;
     
-    // Prevent triggering time updates while seeking
+    // Prevent triggering time updates while seeking or for small changes
     if (Math.abs(time - prevTimeRef.current) < 0.1) return;
     prevTimeRef.current = time;
     
@@ -109,6 +120,7 @@ export function AudioPlayer({
     }
     
     // Set seeking flags
+    updateLockRef.current = true;
     seekOperationInProgressRef.current = true;
     setIsSeeking(true);
     
@@ -124,29 +136,41 @@ export function AudioPlayer({
     }
     
     // Set time without triggering unnecessary callbacks
-    audioRef.current.currentTime = time;
-    
-    // Only call external updates if the time has changed enough
-    if (onTimeUpdateRef.current && Math.abs(time - lastReportedTimeRef.current) > 0.1) {
-      lastReportedTimeRef.current = time;
-      onTimeUpdateRef.current(time);
+    try {
+      audioRef.current.currentTime = time;
+    } catch (err) {
+      console.warn("Could not set audio time, possibly not loaded yet:", err);
+      updateLockRef.current = false;
+      seekOperationInProgressRef.current = false;
+      return;
     }
+    
+    // Release update lock after a short delay
+    setTimeout(() => {
+      updateLockRef.current = false;
+      
+      // Only call external updates if the time has changed enough
+      if (onTimeUpdateRef.current && Math.abs(time - lastReportedTimeRef.current) > 0.1) {
+        lastReportedTimeRef.current = time;
+        onTimeUpdateRef.current(time);
+      }
+    }, 50);
   }, [isPlaying]);
 
   // Throttled time update handling
   const handleTimeUpdate = useCallback(() => {
-    if (!audioRef.current || timeUpdateThrottleRef.current) return;
+    if (!audioRef.current || timeUpdateThrottleRef.current || updateLockRef.current) return;
     
     const newTime = audioRef.current.currentTime;
     
     // Debounce frequent updates
-    if (Date.now() - lastTimeUpdateRef.current < 100) {
+    if (Date.now() - lastTimeUpdateRef.current < 200) {
       if (!timeUpdateThrottleRef.current) {
         timeUpdateThrottleRef.current = true;
         setTimeout(() => {
           timeUpdateThrottleRef.current = false;
-          if (audioRef.current) handleTimeUpdate();
-        }, 100);
+          // Don't automatically call again to avoid loops
+        }, 200);
       }
       return;
     }
@@ -154,28 +178,38 @@ export function AudioPlayer({
     lastTimeUpdateRef.current = Date.now();
     
     // Only update if time changed significantly (prevents loops)
-    if (Math.abs(newTime - currentTime) > 0.1) {
+    if (Math.abs(newTime - currentTime) > 0.2) {
       setCurrentTime(newTime);
       
       // Only call external updates if seeking is not in progress
       if (onTimeUpdateRef.current && !seekOperationInProgressRef.current && 
-          Math.abs(newTime - lastReportedTimeRef.current) > 0.1) {
+          !updateLockRef.current && Math.abs(newTime - lastReportedTimeRef.current) > 0.2) {
+        updateLockRef.current = true;
         lastReportedTimeRef.current = newTime;
-        onTimeUpdateRef.current(newTime);
+        
+        // Delay to break potential loops
+        setTimeout(() => {
+          if (onTimeUpdateRef.current) {
+            onTimeUpdateRef.current(newTime);
+          }
+          updateLockRef.current = false;
+        }, 50);
       }
     }
   }, [currentTime]);
 
-  // Handlers with better loop prevention
+  // Optimized audio event handlers
   const handleLoadedMetadata = useCallback(() => {
     if (audioRef.current) {
       const audioDuration = audioRef.current.duration;
       setDuration(audioDuration);
       setIsLoading(false);
+      audioLoadedRef.current = true;
     }
   }, []);
 
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (updateLockRef.current) return;
     const time = parseFloat(e.target.value);
     jumpToTime(time);
   }, [jumpToTime]);
@@ -189,11 +223,13 @@ export function AudioPlayer({
 
   // Optimized event handlers
   const handleCanPlay = useCallback(() => {
+    audioLoadedRef.current = true;
     setIsLoading(false);
     setIsBuffering(false);
   }, []);
 
   const handleWaiting = useCallback(() => {
+    if (!audioLoadedRef.current) return;
     setIsBuffering(true);
   }, []);
 
@@ -222,19 +258,14 @@ export function AudioPlayer({
     setIsBuffering(false);
     
     // Resume playback if needed
-    if (playAfterSeekRef.current) {
+    if (playAfterSeekRef.current && audioLoadedRef.current) {
       // Delayed resume to let browser catch up
       setTimeout(() => {
         if (audioRef.current) {
-          // Check for time drift
-          if (Math.abs(audioRef.current.currentTime - currentSeekTime) > 0.5) {
-            audioRef.current.currentTime = currentSeekTime;
-          }
-          
           playAudio();
           playAfterSeekRef.current = false;
         }
-      }, 50);
+      }, 100);
     }
     
     // Process queued seeks
@@ -246,24 +277,33 @@ export function AudioPlayer({
         seekQueueRef.current = null;
         jumpToTime(nextSeekTime);
       }
-    }, 100);
+    }, 200);
   }, [playAudio]);
 
   const handleEnded = useCallback(() => {
     setIsPlaying(false);
   }, []);
 
-  const handleError = useCallback(() => {
+  const handleError = useCallback((e: React.SyntheticEvent<HTMLAudioElement, Event>) => {
+    console.error("Audio error:", (e.target as HTMLAudioElement).error);
     setIsLoading(false);
     setIsPlaying(false);
     setIsBuffering(false);
     seekOperationInProgressRef.current = false;
+    audioLoadedRef.current = false;
   }, []);
 
   // Jump to time registration with proper cleanup
   useEffect(() => {
     if (onJumpToTime && audioRef.current) {
-      onJumpToTime(jumpToTime);
+      // Pass a stabilized version of jumpToTime
+      const stableJumpToTimeCallback = (time: number) => {
+        if (audioLoadedRef.current) {
+          jumpToTime(time);
+        }
+      };
+      
+      onJumpToTime(stableJumpToTimeCallback);
     }
     
     return () => {
@@ -271,6 +311,7 @@ export function AudioPlayer({
       lastTimeUpdateRef.current = 0;
       timeUpdateThrottleRef.current = false;
       seekOperationInProgressRef.current = false;
+      updateLockRef.current = false;
       seekQueueRef.current = null;
     };
   }, [jumpToTime, onJumpToTime]);
@@ -288,6 +329,8 @@ export function AudioPlayer({
       playAfterSeekRef.current = false;
       lastReportedTimeRef.current = -1;
       lastTimeUpdateRef.current = 0;
+      updateLockRef.current = false;
+      audioLoadedRef.current = false;
       
       // Reset and reload audio
       if (audioRef.current) {
@@ -326,7 +369,7 @@ export function AudioPlayer({
           size="icon" 
           className="h-8 w-8"
           title="Skip backward 5 seconds"
-          disabled={isLoading || currentTime === 0}
+          disabled={isLoading || currentTime === 0 || updateLockRef.current}
         >
           <SkipBack className="h-4 w-4" />
         </Button>
@@ -336,7 +379,7 @@ export function AudioPlayer({
           variant="default" 
           size="icon"
           className="h-10 w-10 rounded-full"
-          disabled={isLoading || !src}
+          disabled={isLoading || !src || updateLockRef.current || !audioLoadedRef.current}
         >
           {isLoading ? (
             <Loader2 className="h-5 w-5 animate-spin" />
@@ -353,7 +396,7 @@ export function AudioPlayer({
           size="icon" 
           className="h-8 w-8"
           title="Skip forward 5 seconds"
-          disabled={isLoading || currentTime >= duration}
+          disabled={isLoading || currentTime >= duration || updateLockRef.current}
         >
           <SkipForward className="h-4 w-4" />
         </Button>
@@ -374,7 +417,7 @@ export function AudioPlayer({
             "flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer",
             isSeeking && "opacity-80"
           )}
-          disabled={isLoading || !src}
+          disabled={isLoading || !src || updateLockRef.current || !audioLoadedRef.current}
         />
         
         <span className="text-sm tabular-nums">
@@ -382,7 +425,7 @@ export function AudioPlayer({
         </span>
       </div>
 
-      {/* Visual indicators - simplified to reduce DOM updates */}
+      {/* Simplified visual indicators */}
       <div className="text-xs text-center text-muted-foreground">
         {(isSeeking || isBuffering || isLoading) && (
           <span className="animate-pulse">
