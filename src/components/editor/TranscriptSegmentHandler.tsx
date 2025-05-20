@@ -44,8 +44,12 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
                 // Don't trigger if the user is selecting text
                 if (window.getSelection()?.toString()) return;
                 
+                console.log(`Segment clicked with time: ${start}s`);
+                
                 // Call the callback with the start time
-                onSegmentClick(start);
+                if (onSegmentClick) {
+                  onSegmentClick(start);
+                }
                 
                 // Show visual feedback
                 element.classList.add('bg-primary/20');
@@ -84,7 +88,14 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
     }
   }, [editor, onSegmentClick, setupClickHandlers]);
   
+  // Expose method to manually set up click handlers
+  const refreshClickHandlers = useCallback(() => {
+    clickHandlersSetupRef.current = false;
+    setupClickHandlers();
+  }, [setupClickHandlers]);
+  
   return {
-    setupClickHandlers
+    setupClickHandlers,
+    refreshClickHandlers
   };
 }

@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -115,7 +116,7 @@ export function AudioPlayer({
       }
     }
   }, [isPlaying, playbackState, currentTime]);
-  
+
   // Handle play/pause
   const togglePlayPause = useCallback(() => {
     if (!audioRef.current) return;
@@ -374,6 +375,7 @@ export function AudioPlayer({
   const jumpToTime = useCallback((time: number) => {
     if (!audioRef.current) return;
     
+    console.log(`Jumping to time: ${time}s`);
     userInteractingRef.current = true;
     
     // Lock time updates during the jump
@@ -451,11 +453,22 @@ export function AudioPlayer({
 
   // Effect to respond to external time jump requests
   useEffect(() => {
-    if (onJumpToTime) {
-      // We're just setting up the callback - not actively jumping
-      return () => {}; 
-    }
-  }, [onJumpToTime]);
+    // Important: This is where we set up the handler for external jump requests
+    if (!onJumpToTime) return;
+    
+    // Create a handler function that will be exposed through the onJumpToTime prop
+    const handleExternalJumpToTime = (time: number) => {
+      console.log(`External jump request to: ${time}s`);
+      if (audioRef.current && time !== undefined && time >= 0) {
+        jumpToTime(time);
+      }
+    };
+    
+    // Expose our jump handler via the callback
+    onJumpToTime(handleExternalJumpToTime);
+    
+    return () => {}; 
+  }, [onJumpToTime, jumpToTime]);
 
   // Effect to set up continuous state checking for reliability
   useEffect(() => {

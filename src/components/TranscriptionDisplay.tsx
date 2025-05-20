@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -64,6 +64,7 @@ const TranscriptionDisplay = ({
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [jumpToTimeHandler, setJumpToTimeHandler] = useState<(time: number) => void | null>(null);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
@@ -87,15 +88,24 @@ const TranscriptionDisplay = ({
   };
 
   // Handle time updates from the audio player
-  const handleTimeUpdate = (time: number) => {
+  const handleTimeUpdate = useCallback((time: number) => {
+    console.log(`Time updated: ${time}s`);
     setCurrentTime(time);
-  };
+  }, []);
 
-  // Handle jump to time from transcript segments
-  const handleJumpToTime = (time: number) => {
-    setCurrentTime(time);
-    // The actual jump will be handled by the AudioPlayer component
-  };
+  // Set up the jump to time handler that will be passed to the editor
+  const handleJumpToTimeSetup = useCallback((jumpHandler: (time: number) => void) => {
+    console.log("Jump to time handler set up");
+    setJumpToTimeHandler(() => jumpHandler);
+  }, []);
+
+  // Handle segment click from transcript
+  const handleSegmentClick = useCallback((time: number) => {
+    console.log(`Segment clicked, jumping to time: ${time}s`);
+    if (jumpToTimeHandler) {
+      jumpToTimeHandler(time);
+    }
+  }, [jumpToTimeHandler]);
 
   // Handle playback state change
   const handlePlaybackStateChange = (playing: boolean) => {
@@ -168,7 +178,7 @@ const TranscriptionDisplay = ({
             <AudioPlayer 
               src={audioUrl} 
               onTimeUpdate={handleTimeUpdate} 
-              onJumpToTime={handleJumpToTime}
+              onJumpToTime={handleJumpToTimeSetup}
               onPlaybackStateChange={handlePlaybackStateChange}
             />
           </div>
@@ -182,7 +192,7 @@ const TranscriptionDisplay = ({
           onEditorMount={handleEditorMount}
           onEditorChange={handleEditorChange}
           currentTimeInSeconds={currentTime}
-          onJumpToTime={handleJumpToTime}
+          onJumpToTime={handleSegmentClick}
         />
         
         <div className="mt-6 text-center">
@@ -191,6 +201,6 @@ const TranscriptionDisplay = ({
       </div>
     </Card>
   );
-};
+}
 
 export default TranscriptionDisplay;
