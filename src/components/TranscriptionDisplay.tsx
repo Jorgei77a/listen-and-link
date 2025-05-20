@@ -60,8 +60,18 @@ const TranscriptionDisplay = ({
   const [copied, setCopied] = useState(false);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
+  const [isEditorReady, setIsEditorReady] = useState(false);
   
   const displayTitle = customTitle || fileName.split('.')[0];
+
+  useEffect(() => {
+    // Allow a short delay for the editor to initialize properly
+    const timer = setTimeout(() => {
+      setIsEditorReady(true);
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(transcript);
@@ -72,6 +82,7 @@ const TranscriptionDisplay = ({
 
   const handleEditorMount = (editorInstance: LexicalEditorType) => {
     setEditor(editorInstance);
+    console.log("Editor mounted successfully");
   };
 
   const handleEditorChange = (editorState: EditorState) => {
@@ -140,14 +151,16 @@ const TranscriptionDisplay = ({
         </div>
 
         {/* Lexical Editor */}
-        <LexicalEditor 
-          initialText={transcript}
-          segments={segments}
-          className="mb-4"
-          onEditorMount={handleEditorMount}
-          onEditorChange={handleEditorChange}
-          currentTimeInSeconds={currentTime}
-        />
+        {isEditorReady && (
+          <LexicalEditor 
+            initialText={transcript}
+            segments={segments}
+            className="mb-4"
+            onEditorMount={handleEditorMount}
+            onEditorChange={handleEditorChange}
+            currentTimeInSeconds={currentTime}
+          />
+        )}
         
         {/* Audio Player */}
         {audioUrl && (

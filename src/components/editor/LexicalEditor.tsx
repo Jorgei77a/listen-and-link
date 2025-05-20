@@ -82,6 +82,7 @@ export function LexicalEditor({
   const editorRef = useRef<LexicalEditorType | null>(null);
   const [isContentLoaded, setIsContentLoaded] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   const initialConfig = {
     namespace: "TranscriptEditor",
@@ -109,6 +110,15 @@ export function LexicalEditor({
     editable: !readOnly,
     nodes: [ListNode, ListItemNode],
   };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
   // Highlight the paragraph that matches the current audio time
   useEffect(() => {
@@ -182,38 +192,53 @@ export function LexicalEditor({
       });
     });
     
-    // Force editor update and fix visibility after a small delay
-    setTimeout(() => {
+    // Clear any existing timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    
+    // Force editor update and fix visibility after a short delay
+    timeoutRef.current = setTimeout(() => {
       if (editorRef.current) {
-        // Force a repaint by reading the editor state
-        editorRef.current.getEditorState().read(() => {
-          // This ensures the editor state is processed
-          const root = $getRoot();
-          const hasContent = root.getChildrenSize() > 0;
-          console.log("Editor content loaded:", hasContent);
-        });
-        
-        // Apply a focus/blur cycle to ensure content renders
-        // This mimics what happens when a user clicks
-        editorRef.current.focus();
-        
-        // Mark content as loaded
-        setIsContentLoaded(true);
-        setIsInitializing(false);
+        try {
+          // Force a repaint by reading the editor state
+          editorRef.current.getEditorState().read(() => {
+            // This ensures the editor state is processed
+            const root = $getRoot();
+            const hasContent = root.getChildrenSize() > 0;
+            console.log("Editor content loaded:", hasContent, "with", root.getChildrenSize(), "paragraphs");
+          });
+          
+          // Apply focus to the editor to ensure content renders
+          editorRef.current.focus();
+          
+          // Now blur it so it doesn't stay focused unnecessarily
+          editorRef.current.blur();
+          
+          // Mark content as loaded and hide skeletons
+          setIsContentLoaded(true);
+          setIsInitializing(false);
+          
+          console.log("Editor initialization completed");
+        } catch (error) {
+          console.error("Error during editor initialization:", error);
+          // Even if there's an error, we should still hide the loading state
+          setIsInitializing(false);
+        }
       }
-    }, 100);
+    }, 300); // Slightly longer delay to ensure DOM is ready
     
   }, [initialText, segments, onEditorMount]);
 
-  // Force update after editor and content are loaded
+  // Apply timestamp data attributes to DOM elements after content is loaded
   useEffect(() => {
     if (isContentLoaded && editorRef.current) {
+      console.log("Applying timestamp data attributes to paragraphs");
+      
       editorRef.current.update(() => {
-        // Force update to ensure content is visible
         const root = $getRoot();
         const paragraphs = root.getChildren();
         
-        // Apply timestamp data attributes to DOM again for certainty
         paragraphs.forEach((paragraph: LexicalNode) => {
           if ((paragraph as any).timestampData) {
             const element = editorRef.current?.getElementByKey(paragraph.getKey());
@@ -224,6 +249,21 @@ export function LexicalEditor({
           }
         });
       });
+      
+      // Additional force update to ensure all content is visible
+      // This helps with certain edge cases where content might not appear
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      
+      timeoutRef.current = setTimeout(() => {
+        if (editorRef.current) {
+          // Force a final re-render of the editor
+          editorRef.current.update(() => {
+            // No changes needed, just triggering an update
+          });
+        }
+      }, 100);
     }
   }, [isContentLoaded]);
 
