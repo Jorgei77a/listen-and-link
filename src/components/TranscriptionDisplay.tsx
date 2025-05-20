@@ -9,6 +9,7 @@ import { LexicalEditor } from "@/components/editor/LexicalEditor";
 import { AudioPlayer } from "@/components/editor/AudioPlayer";
 import { ExportOptions } from "@/components/editor/ExportOptions";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
+import { SEGMENT_TIMING } from "@/utils/audioUtils";
 
 interface TranscriptionDisplayProps {
   transcript: string;
@@ -60,6 +61,7 @@ const TranscriptionDisplay = ({
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
+  const [debugMode, setDebugMode] = useState(false);
   
   // Stable refs to prevent infinite loops
   const audioPlayerCallbackRef = useRef<((time: number) => void) | null>(null);
@@ -68,11 +70,22 @@ const TranscriptionDisplay = ({
   const isUpdatingFromEditorRef = useRef<boolean>(false);
   const currentTimeRef = useRef<number | null>(currentTime);
   const isFirstTimeUpdateRef = useRef<boolean>(true);
+  const segmentsRef = useRef(segments);
   
   // Keep currentTimeRef in sync
   useEffect(() => {
     currentTimeRef.current = currentTime;
   }, [currentTime]);
+  
+  // Keep segmentsRef in sync
+  useEffect(() => {
+    segmentsRef.current = segments;
+  }, [segments]);
+
+  // Sync debug mode with audioUtils
+  useEffect(() => {
+    SEGMENT_TIMING.DEBUG = debugMode;
+  }, [debugMode]);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
@@ -164,6 +177,11 @@ const TranscriptionDisplay = ({
     };
   }, []);
 
+  // Toggle debug mode
+  const toggleDebugMode = useCallback(() => {
+    setDebugMode(prev => !prev);
+  }, []);
+
   // Extract statistics from the transcript
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
   const paragraphCount = segments?.length || transcript.split(/\n\s*\n/).filter(Boolean).length;
@@ -238,10 +256,29 @@ const TranscriptionDisplay = ({
           </div>
         )}
         
-        {/* Simplified debug information */}
+        {/* Debug information and controls */}
         <div className="mt-4 p-2 bg-gray-50 rounded-md text-xs text-muted-foreground">
-          <p>Status: {audioUrl ? "✅ Audio loaded" : "❌ No audio"}, Editor: {editorReady ? "✅ Ready" : "❌ Loading"}, Player: {playerReady ? "✅ Ready" : "❌ Loading"}</p>
+          <div className="flex justify-between items-center">
+            <p>Status: {audioUrl ? "✅ Audio loaded" : "❌ No audio"}, Editor: {editorReady ? "✅ Ready" : "❌ Loading"}, Player: {playerReady ? "✅ Ready" : "❌ Loading"}</p>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-6 text-xs"
+              onClick={toggleDebugMode}
+            >
+              {debugMode ? "Disable Debug" : "Enable Debug"}
+            </Button>
+          </div>
           {currentTime !== null && <p>Position: {currentTime.toFixed(2)}s</p>}
+          {debugMode && (
+            <div className="mt-2 border-t pt-2 text-xs">
+              <p>Segment Buffers: End={SEGMENT_TIMING.END_BUFFER}s, Lookahead={SEGMENT_TIMING.LOOKAHEAD}s</p>
+              <p>Overlap Priority: {SEGMENT_TIMING.OVERLAP_PRIORITY}</p>
+              {segments.length > 0 && (
+                <p>Segments: {segments.length}, First: {segments[0].start}s-{segments[0].end}s, Last: {segments[segments.length-1].start}s-{segments[segments.length-1].end}s</p>
+              )}
+            </div>
+          )}
         </div>
         
         <div className="mt-6 text-center">
