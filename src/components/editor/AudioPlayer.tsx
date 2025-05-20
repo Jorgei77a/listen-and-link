@@ -1,172 +1,88 @@
+
 import { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Play, Pause, SkipBack, SkipForward, Volume2 } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
 
 interface AudioPlayerProps {
   src: string;
   className?: string;
   onTimeUpdate?: (currentTime: number) => void;
-  onPlaybackStateChange?: (isPlaying: boolean) => void;
-  jumpToTime?: number | null;
+  onJumpToTime?: (time: number) => void;
 }
 
 export function AudioPlayer({ 
   src, 
   className,
   onTimeUpdate,
-  onPlaybackStateChange,
-  jumpToTime
+  onJumpToTime
 }: AudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [ready, setReady] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const userInteractionRef = useRef<boolean>(false);
-  const seekingRef = useRef<boolean>(false);
 
-  // Toggle play/pause
   const togglePlayPause = () => {
-    if (!audioRef.current || !ready) return;
-    
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play().catch(error => {
-        console.error("Audio playback failed:", error);
-      });
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
     }
   };
 
-  // Skip forward/backward
   const skipForward = () => {
-    if (audioRef.current && ready) {
-      userInteractionRef.current = true;
+    if (audioRef.current) {
       audioRef.current.currentTime += 5;
     }
   };
 
   const skipBackward = () => {
-    if (audioRef.current && ready) {
-      userInteractionRef.current = true;
+    if (audioRef.current) {
       audioRef.current.currentTime -= 5;
     }
   };
 
-  // Handle time updates
   const handleTimeUpdate = () => {
     if (audioRef.current) {
-      const newTime = audioRef.current.currentTime;
-      setCurrentTime(newTime);
+      setCurrentTime(audioRef.current.currentTime);
       if (onTimeUpdate) {
-        onTimeUpdate(newTime);
+        onTimeUpdate(audioRef.current.currentTime);
       }
     }
   };
 
-  // Handle metadata loaded
   const handleLoadedMetadata = () => {
     if (audioRef.current) {
       setDuration(audioRef.current.duration);
-      setReady(true);
     }
-  };
-
-  // Handle seeking
-  const handleSeekStart = () => {
-    seekingRef.current = true;
-    userInteractionRef.current = true;
-  };
-
-  const handleSeekEnd = () => {
-    seekingRef.current = false;
-    // Allow time for the currentTime to update
-    setTimeout(() => {
-      userInteractionRef.current = false;
-    }, 200);
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
-    
+    setCurrentTime(time);
     if (audioRef.current) {
-      userInteractionRef.current = true;
       audioRef.current.currentTime = time;
-      setCurrentTime(time);
+    }
+    if (onTimeUpdate) {
+      onTimeUpdate(time);
     }
   };
 
-  // Format time for display
   const formatTime = (time: number) => {
     const minutes = Math.floor(time / 60);
     const seconds = Math.floor(time % 60);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // Handle play/pause state changes
+  // Effect to handle external time jumps
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const handlePlay = () => {
-      setIsPlaying(true);
-      if (onPlaybackStateChange) {
-        onPlaybackStateChange(true);
-      }
-    };
-
-    const handlePause = () => {
-      setIsPlaying(false);
-      if (onPlaybackStateChange) {
-        onPlaybackStateChange(false);
-      }
-    };
-
-    const handleEnded = () => {
-      setIsPlaying(false);
-      if (onPlaybackStateChange) {
-        onPlaybackStateChange(false);
-      }
-    };
-
-    audio.addEventListener('play', handlePlay);
-    audio.addEventListener('pause', handlePause);
-    audio.addEventListener('ended', handleEnded);
-
-    return () => {
-      audio.removeEventListener('play', handlePlay);
-      audio.removeEventListener('pause', handlePause);
-      audio.removeEventListener('ended', handleEnded);
-    };
-  }, [onPlaybackStateChange]);
-
-  // Handle external time jump requests
-  useEffect(() => {
-    if (jumpToTime !== null && audioRef.current && ready) {
-      console.log(`AudioPlayer: Jumping to time: ${jumpToTime}`);
-      audioRef.current.currentTime = jumpToTime;
-      setCurrentTime(jumpToTime); // Keep UI in sync
-      // If paused, and we get a jump, we should play.
-      // If already playing, it will continue from the new position.
-      if (!isPlaying || audioRef.current.paused) { 
-        audioRef.current.play().catch(error => {
-          console.error("AudioPlayer: Playback after jump failed:", error);
-        });
-      }
+    if (onJumpToTime) {
+      return () => {}; // This effect just sets up the callback
     }
-  }, [jumpToTime, ready]); // isPlaying is intentionally not a dependency here
-
-  // Make sure audio element stays in sync with our state
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || seekingRef.current || userInteractionRef.current) return;
-
-    // Only update if there's a significant difference to avoid loops
-    if (Math.abs(audio.currentTime - currentTime) > 0.5) {
-      audio.currentTime = currentTime;
-    }
-  }, [currentTime]);
+  }, [onJumpToTime]);
 
   return (
     <div className={cn("flex flex-col space-y-2", className)}>
@@ -175,6 +91,7 @@ export function AudioPlayer({
         src={src}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
+        onEnded={() => setIsPlaying(false)}
       />
       
       <div className="flex items-center justify-center space-x-2">
@@ -184,7 +101,6 @@ export function AudioPlayer({
           size="icon" 
           className="h-8 w-8"
           title="Skip backward 5 seconds"
-          disabled={!ready}
         >
           <SkipBack className="h-4 w-4" />
         </Button>
@@ -194,7 +110,6 @@ export function AudioPlayer({
           variant="default" 
           size="icon"
           className="h-10 w-10 rounded-full"
-          disabled={!ready}
         >
           {isPlaying ? (
             <Pause className="h-5 w-5" />
@@ -209,7 +124,6 @@ export function AudioPlayer({
           size="icon" 
           className="h-8 w-8"
           title="Skip forward 5 seconds"
-          disabled={!ready}
         >
           <SkipForward className="h-4 w-4" />
         </Button>
@@ -226,12 +140,7 @@ export function AudioPlayer({
           max={duration || 0}
           value={currentTime}
           onChange={handleSeek}
-          onMouseDown={handleSeekStart}
-          onMouseUp={handleSeekEnd}
-          onTouchStart={handleSeekStart}
-          onTouchEnd={handleSeekEnd}
           className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-          disabled={!ready}
         />
         
         <span className="text-sm tabular-nums">

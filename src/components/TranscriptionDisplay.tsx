@@ -6,11 +6,11 @@ import { Separator } from "@/components/ui/separator";
 import { Clock, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
-import { ExportOptions } from "@/components/editor/ExportOptions";
+import { LexicalEditor } from "@/components/editor/LexicalEditor";
 import { AudioPlayer } from "@/components/editor/AudioPlayer";
-import { EditableInteractiveTranscript } from "@/components/editor/EditableInteractiveTranscript";
+import { ExportOptions } from "@/components/editor/ExportOptions";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
-import { TranscriptSegment } from "@/utils/transcriptSyncUtils";
+import { useSubscription } from "@/context/SubscriptionContext";
 
 interface TranscriptionDisplayProps {
   transcript: string;
@@ -18,16 +18,23 @@ interface TranscriptionDisplayProps {
   customTitle?: string;
   audioDuration?: number | null;
   audioUrl?: string;
-  segments?: TranscriptSegment[];
+  segments?: Array<{
+    start: number;
+    end: number;
+    text: string;
+  }>;
   onReset: () => void;
 }
 
 /**
  * Format audio duration into a human-readable string
+ * @param seconds - Duration in seconds
+ * @returns Formatted string like "8 mins 20 secs" or "45 secs"
  */
 const formatAudioDuration = (seconds: number | null): string => {
   if (seconds === null || seconds === undefined) return "";
   
+  // Force conversion to number, then round to nearest integer to eliminate decimals
   const totalSeconds = Math.round(Number(seconds));
   const minutes = Math.floor(totalSeconds / 60);
   const remainingSeconds = totalSeconds % 60;
@@ -51,15 +58,12 @@ const TranscriptionDisplay = ({
   onReset 
 }: TranscriptionDisplayProps) => {
   const [copied, setCopied] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [jumpToTime, setJumpToTime] = useState<number | null>(null);
+  const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const lastJumpTimeRef = useRef<number>(0);
+  const [editorReady, setEditorReady] = useState(false);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
-  // Handle copy button click
   const handleCopy = () => {
     navigator.clipboard.writeText(transcript);
     setCopied(true);
@@ -67,33 +71,23 @@ const TranscriptionDisplay = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Handle editor mount
   const handleEditorMount = (editorInstance: LexicalEditorType) => {
+    console.log("Editor mounted successfully");
     setEditor(editorInstance);
+    setEditorReady(true);
   };
 
-  // Handle audio time update
+  const handleEditorChange = (editorState: EditorState) => {
+    // Handle editor changes if needed
+  };
+
   const handleTimeUpdate = (time: number) => {
     setCurrentTime(time);
   };
 
-  // Handle segment click to jump to specific timestamp
-  const handleSegmentClick = (segment: TranscriptSegment) => {
-    const now = Date.now();
-    // Debounce clicks to prevent rapid-fire jumps if desired
-    if (now - lastJumpTimeRef.current < 200) { 
-      console.log("Segment click debounced");
-      return;
-    }
-    lastJumpTimeRef.current = now;
-
-    console.log(`TranscriptionDisplay: Setting jumpToTime to ${segment.start}`);
-    setJumpToTime(segment.start);
-  };
-
-  // Handle playback state changes
-  const handlePlaybackStateChange = (playingState: boolean) => {
-    setIsPlaying(playingState);
+  const jumpToTime = (time: number) => {
+    // This would be called when clicking on a paragraph with a timestamp
+    setCurrentTime(time);
   };
 
   // Extract statistics from the transcript
@@ -147,37 +141,27 @@ const TranscriptionDisplay = ({
             </>
           )}
         </div>
+
+        {/* Lexical Editor */}
+        <LexicalEditor 
+          initialText={transcript}
+          segments={segments}
+          className="mb-4"
+          onEditorMount={handleEditorMount}
+          onEditorChange={handleEditorChange}
+          currentTimeInSeconds={currentTime}
+        />
         
         {/* Audio Player */}
         {audioUrl && (
-          <div className="mt-4 mb-4">
+          <div className="mt-4">
             <AudioPlayer 
               src={audioUrl} 
-              onTimeUpdate={handleTimeUpdate}
-              onPlaybackStateChange={handlePlaybackStateChange}
-              jumpToTime={jumpToTime}
+              onTimeUpdate={handleTimeUpdate} 
+              onJumpToTime={jumpToTime}
             />
           </div>
         )}
-        
-        {/* Editable Interactive Transcript - combines navigation and editing */}
-        <div className="mt-4 border rounded-md">
-          <h3 className="text-lg font-medium px-4 pt-3 pb-1">Transcript</h3>
-          {segments && segments.length > 0 ? (
-            <EditableInteractiveTranscript
-              segments={segments}
-              currentTime={currentTime}
-              onSegmentClick={handleSegmentClick}
-              isPlaying={isPlaying}
-              className="h-[400px]"
-              onEditorMount={handleEditorMount}
-            />
-          ) : (
-            <div className="p-4 text-muted-foreground italic">
-              No segments available for this transcript.
-            </div>
-          )}
-        </div>
         
         <div className="mt-6 text-center">
           <Button onClick={onReset}>Transcribe Another File</Button>
