@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -42,14 +41,16 @@ const Index = () => {
           setTranscript(data.transcript);
           setIsProcessing(false);
           
-          // Store the audio duration
+          // Store the audio duration - make sure to round it here
           if (data.audio_duration) {
-            setAudioDuration(data.audio_duration);
+            // Explicitly round the duration to avoid decimal issues
+            const roundedDuration = Number(data.audio_duration);
+            setAudioDuration(roundedDuration);
             
             // Update monthly usage with the actual audio duration from the server
             try {
-              await updateMonthlyUsage(data.audio_duration);
-              console.log(`Updated usage with confirmed duration: ${data.audio_duration}s`);
+              await updateMonthlyUsage(roundedDuration);
+              console.log(`Updated usage with confirmed duration: ${roundedDuration}s`);
             } catch (error) {
               console.error('Failed to update usage with confirmed duration:', error);
             }
