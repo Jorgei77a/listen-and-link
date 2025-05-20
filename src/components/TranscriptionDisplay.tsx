@@ -1,20 +1,35 @@
-import { useState } from "react";
+
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { Download, Lock, Clock, AlertCircle } from "lucide-react";
+import { 
+  Download, 
+  Lock, 
+  Clock, 
+  FileText,
+  FileText2
+} from "lucide-react";
 import { toast } from "sonner";
-import ReactMarkdown from "react-markdown";
-import { useSubscription } from "@/context/SubscriptionContext";
 import { Badge } from "@/components/ui/badge";
+import { useSubscription } from "@/context/SubscriptionContext";
 import { FeatureGate } from "@/components/FeatureGate";
+import TranscriptEditor from "./TranscriptEditor";
+import TranscriptAudioPlayer from "./TranscriptAudioPlayer";
+import { 
+  formatAudioDuration, 
+  extractTimestamps, 
+  TranscriptSegment,
+  findSegmentAtPosition
+} from "@/utils/audioUtils";
 
 interface TranscriptionDisplayProps {
   transcript: string;
   fileName: string;
   customTitle?: string;
   audioDuration?: number | null;
+  audioUrl?: string | null;
   onReset: () => void;
 }
 
@@ -44,45 +59,35 @@ const formatTranscript = (text: string): string => {
   return formatted;
 };
 
-/**
- * Format audio duration into a human-readable string
- * @param seconds - Duration in seconds
- * @returns Formatted string like "8 mins 20 secs" or "45 secs"
- */
-const formatAudioDuration = (seconds: number | null): string => {
-  if (seconds === null || seconds === undefined) return "";
-  
-  // Force conversion to number, then round to nearest integer to eliminate decimals
-  const totalSeconds = Math.round(Number(seconds));
-  const minutes = Math.floor(totalSeconds / 60);
-  const remainingSeconds = totalSeconds % 60;
-  
-  if (minutes === 0) {
-    return `${remainingSeconds} ${remainingSeconds === 1 ? 'sec' : 'secs'}`;
-  } else if (remainingSeconds === 0) {
-    return `${minutes} ${minutes === 1 ? 'min' : 'mins'}`;
-  } else {
-    return `${minutes} ${minutes === 1 ? 'min' : 'mins'} ${remainingSeconds} ${remainingSeconds === 1 ? 'sec' : 'secs'}`;
-  }
-};
-
 const TranscriptionDisplay = ({ 
   transcript, 
   fileName, 
   customTitle = "", 
   audioDuration = null,
+  audioUrl = null,
   onReset 
 }: TranscriptionDisplayProps) => {
   const [copied, setCopied] = useState(false);
+  const [editedContent, setEditedContent] = useState<string>("");
+  const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const displayTitle = customTitle || fileName.split('.')[0];
   const formattedTranscript = formatTranscript(transcript);
+
+  // Initialize edited content from formatted transcript
+  useEffect(() => {
+    setEditedContent(formattedTranscript);
+    
+    // Extract any timestamps from the transcript
+    const extractedSegments = extractTimestamps(transcript);
+    setSegments(extractedSegments);
+  }, [transcript, formattedTranscript]);
 
   // Get subscription information
   const { getTierLimits, currentTier } = useSubscription();
   const availableFormats = getTierLimits('exportFormats');
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(transcript);
+    navigator.clipboard.writeText(editedContent || transcript);
     setCopied(true);
     toast.success("Transcript copied to clipboard!");
     setTimeout(() => setCopied(false), 2000);
@@ -104,8 +109,11 @@ const TranscriptionDisplay = ({
       return;
     }
     
-    // Decide which text to download
-    const textToDownload = format === 'plain' ? transcript : formattedTranscript;
+    // Decide which text to download - use the edited content if available
+    const textToDownload = format === 'plain' 
+      ? editedContent.replace(/<[^>]*>/g, '') || transcript 
+      : editedContent || formattedTranscript;
+      
     const fileExtension = format === 'plain' ? 'txt' : 'md';
     
     const element = document.createElement("a");
@@ -118,11 +126,26 @@ const TranscriptionDisplay = ({
     toast.success(`Transcript downloaded as ${format === 'plain' ? 'text' : 'markdown'}!`);
   };
 
+  const handleEditorChange = (html: string) => {
+    setEditedContent(html);
+  };
+  
+  const handleTextClick = (event: MouseEvent, position: number) => {
+    // Find the segment containing the clicked position and seek to its timestamp
+    const segment = findSegmentAtPosition(segments, position);
+    if (segment?.startTime) {
+      // We would use onSeek here to update the audio player
+      console.log(`Seeking to timestamp: ${segment.startTime}s`);
+    }
+  };
+  
+  const handleAudioTimeUpdate = (currentTime: number) => {
+    // This would be used to highlight the current segment being played
+    console.log(`Audio time updated: ${currentTime}s`);
+  };
+
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
   const paragraphs = formattedTranscript.split(/\n\s*\n/).filter(Boolean).length;
-
-  // Format audio duration as a user-friendly string - ensure we're explicitly rounding here
-  const formattedDuration = audioDuration !== null ? formatAudioDuration(audioDuration) : null;
 
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-lg">
@@ -145,16 +168,18 @@ const TranscriptionDisplay = ({
                 <div className="py-1">
                   <button 
                     onClick={() => handleDownload('plain')} 
-                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
                   >
+                    <FileText className="w-3 h-3 mr-1" />
                     Plain Text (.txt)
                   </button>
                   
                   {availableFormats.includes('markdown') ? (
                     <button 
                       onClick={() => handleDownload('markdown')} 
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
                     >
+                      <FileText2 className="w-3 h-3 mr-1" />
                       Markdown (.md)
                     </button>
                   ) : (
@@ -185,13 +210,13 @@ const TranscriptionDisplay = ({
             <span className="font-medium">File:</span>
             <span className="ml-1 truncate max-w-[200px]">{fileName}</span>
           </div>
-          {formattedDuration && (
+          {audioDuration && (
             <>
               <Separator orientation="vertical" className="h-4" />
               <div className="flex items-center">
                 <span className="font-medium">Duration:</span>
                 <span className="ml-1 flex items-center">
-                  {formattedDuration}
+                  {formatAudioDuration(audioDuration)}
                   <Badge variant="secondary" className="ml-1 text-xs h-5 px-1 py-0" title="Duration confirmed by transcription service">
                     <Clock className="w-3 h-3 mr-1" /> Confirmed
                   </Badge>
@@ -201,16 +226,31 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
-        <Tabs defaultValue="formatted">
+        <Tabs defaultValue="editor">
           <TabsList className="mb-4">
-            <TabsTrigger value="formatted">Formatted</TabsTrigger>
+            <TabsTrigger value="editor">Editor</TabsTrigger>
             <TabsTrigger value="plain">Plain Text</TabsTrigger>
           </TabsList>
-          <TabsContent value="formatted">
-            <div className="bg-muted p-4 rounded-lg max-h-[400px] overflow-y-auto prose prose-sm max-w-none">
-              <ReactMarkdown>{formattedTranscript}</ReactMarkdown>
-            </div>
+          
+          <TabsContent value="editor">
+            <TranscriptEditor 
+              content={formattedTranscript}
+              onChange={handleEditorChange}
+              onTextClick={handleTextClick}
+            />
+            
+            <FeatureGate
+              featureKey="audio_player"
+              description="Audio playback is available on all plans"
+            >
+              <TranscriptAudioPlayer 
+                fileName={fileName}
+                audioUrl={audioUrl || undefined}
+                onTimeUpdate={handleAudioTimeUpdate}
+              />
+            </FeatureGate>
           </TabsContent>
+          
           <TabsContent value="plain">
             <div className="bg-muted p-4 rounded-lg max-h-[400px] overflow-y-auto">
               <pre className="whitespace-pre-wrap font-sans text-sm">

@@ -18,6 +18,7 @@ const Index = () => {
   const [customTitle, setCustomTitle] = useState<string>("");
   const [transcriptionCompleted, setTranscriptionCompleted] = useState(false);
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   
   const { updateMonthlyUsage } = useSubscription();
 
@@ -83,6 +84,10 @@ const Index = () => {
     setTranscriptionCompleted(false);
     setAudioDuration(null);
     
+    // Create and store URL for the audio file
+    const audioObjectUrl = URL.createObjectURL(file);
+    setAudioUrl(audioObjectUrl);
+    
     if (transcriptionId) {
       setCurrentTranscriptionId(transcriptionId);
     }
@@ -95,6 +100,12 @@ const Index = () => {
     setCustomTitle("");
     setTranscriptionCompleted(false);
     setAudioDuration(null);
+    
+    // Clean up object URL to prevent memory leaks
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl(null);
+    }
   };
 
   return (
@@ -121,6 +132,7 @@ const Index = () => {
               fileName={currentFileName}
               customTitle={customTitle}
               audioDuration={audioDuration}
+              audioUrl={audioUrl}
               onReset={handleReset} 
             />
           ) : (
