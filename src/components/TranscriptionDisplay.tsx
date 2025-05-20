@@ -87,8 +87,8 @@ const TranscriptionDisplay = ({
     setCurrentTime(time);
   };
 
-  const handleJumpToTimeSetup = (jumpToTimeFn: (time: number) => void) => {
-    jumpToTimeRef.current = jumpToTimeFn;
+  const registerJumpToTimeFunction = (jumpFn: (time: number) => void) => {
+    jumpToTimeRef.current = jumpFn;
   };
 
   const handleSegmentClick = (segmentStartTime: number) => {
@@ -156,7 +156,7 @@ const TranscriptionDisplay = ({
             <AudioPlayer 
               src={audioUrl} 
               onTimeUpdate={handleTimeUpdate} 
-              onJumpToTime={handleJumpToTimeSetup}
+              onJumpToTime={registerJumpToTimeFunction} 
             />
           </div>
         )}

@@ -1,5 +1,5 @@
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
@@ -8,7 +8,7 @@ interface AudioPlayerProps {
   src: string;
   className?: string;
   onTimeUpdate?: (currentTime: number) => void;
-  onJumpToTime?: (time: number) => void;
+  onJumpToTime?: (registerJumpFn: (time: number) => void) => void;
 }
 
 export function AudioPlayer({ 
@@ -77,40 +77,23 @@ export function AudioPlayer({
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // Effect to handle external time jumps
-  useEffect(() => {
-    if (onJumpToTime && audioRef.current) {
-      const jumpToTimeHandler = (time: number) => {
-        if (audioRef.current) {
-          audioRef.current.currentTime = time;
-          if (!isPlaying) {
-            audioRef.current.play().catch(err => console.error('Failed to play audio:', err));
-            setIsPlaying(true);
-          }
-        }
-      };
-      
-      // Create a custom event listener for time jumps
-      const eventName = 'audio-jump-to-time';
-      const handleJumpEvent = (e: CustomEvent) => jumpToTimeHandler(e.detail);
-      
-      // Cast to any to allow adding the listener
-      window.addEventListener(eventName as any, handleJumpEvent as any);
-      
-      // Expose a method to jump to time
-      const jumpToTimeFn = (time: number) => {
-        const event = new CustomEvent(eventName, { detail: time });
-        window.dispatchEvent(event);
-      };
-      
-      // Make the function available to the parent component
-      onJumpToTime(jumpToTimeFn);
-      
-      return () => {
-        window.removeEventListener(eventName as any, handleJumpEvent as any);
-      };
+  // Define the jump function
+  const jumpToTime = useCallback((time: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+      if (!isPlaying) {
+        audioRef.current.play().catch(err => console.error('Failed to play audio:', err));
+        setIsPlaying(true);
+      }
     }
-  }, [onJumpToTime, isPlaying]);
+  }, [isPlaying]);
+
+  // Register the jump function with the parent component
+  useEffect(() => {
+    if (onJumpToTime) {
+      onJumpToTime(jumpToTime);
+    }
+  }, [onJumpToTime, jumpToTime]);
 
   return (
     <div className={cn("flex flex-col space-y-2", className)}>
