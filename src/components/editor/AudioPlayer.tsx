@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -24,8 +23,6 @@ export function AudioPlayer({
   const [duration, setDuration] = useState(0);
   const [ready, setReady] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const jumpHandledRef = useRef<boolean>(false);
-  const lastJumpTimeRef = useRef<number | null>(null);
   const userInteractionRef = useRef<boolean>(false);
   const seekingRef = useRef<boolean>(false);
 
@@ -146,38 +143,19 @@ export function AudioPlayer({
 
   // Handle external time jump requests
   useEffect(() => {
-    // Only process if we have a valid jumpToTime value
-    if (jumpToTime !== null && jumpToTime !== undefined && 
-        audioRef.current && ready) {
-      
-      // Force jump if it's a new request time OR we need to re-jump to the same time
-      const shouldJump = jumpToTime !== lastJumpTimeRef.current || !jumpHandledRef.current;
-
-      if (shouldJump) {
-        console.log(`Jumping to time: ${jumpToTime}`);
-        
-        // Update our refs to track this jump
-        jumpHandledRef.current = true;
-        lastJumpTimeRef.current = jumpToTime;
-        
-        // Set the current time and force an update
-        audioRef.current.currentTime = jumpToTime;
-        setCurrentTime(jumpToTime);
-        
-        // Always play when jumping to a new time
+    if (jumpToTime !== null && audioRef.current && ready) {
+      console.log(`AudioPlayer: Jumping to time: ${jumpToTime}`);
+      audioRef.current.currentTime = jumpToTime;
+      setCurrentTime(jumpToTime); // Keep UI in sync
+      // If paused, and we get a jump, we should play.
+      // If already playing, it will continue from the new position.
+      if (!isPlaying || audioRef.current.paused) { 
         audioRef.current.play().catch(error => {
-          console.error("Audio playback after jump failed:", error);
+          console.error("AudioPlayer: Playback after jump failed:", error);
         });
       }
     }
-  }, [jumpToTime, ready]);
-
-  // Clean up jumpHandledRef whenever jumpToTime changes back to null
-  useEffect(() => {
-    if (jumpToTime === null) {
-      jumpHandledRef.current = false;
-    }
-  }, [jumpToTime]);
+  }, [jumpToTime, ready]); // isPlaying is intentionally not a dependency here
 
   // Make sure audio element stays in sync with our state
   useEffect(() => {
