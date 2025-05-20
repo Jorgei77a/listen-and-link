@@ -1,12 +1,12 @@
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { ListItemNode, ListNode } from "@lexical/list";
-import { HeadingNode } from "@lexical/rich-text"; // Add import for HeadingNode
+import { HeadingNode } from "@lexical/rich-text";
 import LexicalErrorBoundary from "@lexical/react/LexicalErrorBoundary";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { EditorToolbar } from "./EditorToolbar";
@@ -22,6 +22,9 @@ import {
 } from "lexical";
 import { cn } from "@/lib/utils";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
+import { TimestampHighlighter } from "./TimestampHighlighter";
+import { TranscriptSegmentHandler } from "./TranscriptSegmentHandler";
+import { normalizeSegments, TranscriptSegment as AudioSegment } from "@/utils/audioSyncUtils";
 
 interface LexicalEditorProps {
   initialText: string;
@@ -35,6 +38,7 @@ interface LexicalEditorProps {
   onEditorMount?: (editor: LexicalEditorType) => void;
   onEditorChange?: (editorState: EditorState) => void;
   currentTimeInSeconds?: number | null;
+  onJumpToTime?: (time: number) => void;
 }
 
 // Create a custom interface to handle our timestamps
@@ -99,8 +103,13 @@ function InitializeContent({
           // Clear any existing content
           root.clear();
           
+          // Normalize segments to ensure consistent boundaries
+          const normalizedSegments = segments 
+            ? normalizeSegments(segments as AudioSegment[])
+            : undefined;
+          
           // Split the text into segments
-          const textSegments = createTextSegments(initialText, segments);
+          const textSegments = createTextSegments(initialText, normalizedSegments);
           
           // Create paragraph nodes for each segment
           textSegments.forEach((segment) => {
@@ -142,7 +151,7 @@ function InitializeContent({
           // Finally set as initialized and notify parent
           setIsInitialized(true);
           if (onReady) onReady();
-        }, 50);
+        }, 100);
       } catch (error) {
         console.error("Error initializing Lexical editor content:", error);
         setIsInitialized(true); // Mark as initialized even on error to prevent retries
@@ -155,45 +164,6 @@ function InitializeContent({
   return null;
 }
 
-// Component to handle timestamp highlighting based on current audio time
-function TimestampHighlighter({ currentTimeInSeconds }: { currentTimeInSeconds?: number | null }) {
-  const [editor] = useLexicalComposerContext();
-  
-  useEffect(() => {
-    if (!currentTimeInSeconds || !editor) return;
-    
-    editor.update(() => {
-      const root = $getRoot();
-      const paragraphs = root.getChildren();
-      
-      paragraphs.forEach((paragraph) => {
-        const element = editor.getElementByKey(paragraph.getKey());
-        if (!element) return;
-        
-        // Check if this paragraph has timestamp data attributes
-        const start = parseFloat(element.getAttribute('data-start') || '0');
-        const end = parseFloat(element.getAttribute('data-end') || '0');
-        
-        if (start <= currentTimeInSeconds && currentTimeInSeconds <= end) {
-          element.classList.add('bg-primary/10', 'transition-colors');
-          
-          // Scroll into view if needed
-          const rect = element.getBoundingClientRect();
-          const parentRect = element.parentElement?.getBoundingClientRect();
-          
-          if (parentRect && (rect.bottom > parentRect.bottom || rect.top < parentRect.top)) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        } else {
-          element.classList.remove('bg-primary/10');
-        }
-      });
-    });
-  }, [currentTimeInSeconds, editor]);
-  
-  return null;
-}
-
 export function LexicalEditor({
   initialText,
   segments,
@@ -202,9 +172,18 @@ export function LexicalEditor({
   onEditorMount,
   onEditorChange,
   currentTimeInSeconds,
+  onJumpToTime
 }: LexicalEditorProps) {
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const [isContentReady, setIsContentReady] = useState(false);
+  const [normalizedSegments, setNormalizedSegments] = useState<AudioSegment[]>([]);
+  
+  // Create normalized segments once from the original segments
+  useEffect(() => {
+    if (segments) {
+      setNormalizedSegments(normalizeSegments(segments as AudioSegment[]));
+    }
+  }, [segments]);
   
   const initialConfig = {
     namespace: "TranscriptEditor",
@@ -230,8 +209,29 @@ export function LexicalEditor({
       console.error("Lexical Editor Error:", error);
     },
     editable: !readOnly,
-    nodes: [ListNode, ListItemNode, HeadingNode], // Add HeadingNode to the nodes array
+    nodes: [ListNode, ListItemNode, HeadingNode],
   };
+
+  // Custom plugin to set up click handlers after editor is ready
+  function SegmentClickPlugin() {
+    const [editor] = useLexicalComposerContext();
+    const { setupClickHandlers } = TranscriptSegmentHandler({
+      onSegmentClick: onJumpToTime
+    });
+    
+    useEffect(() => {
+      // Set timeout to ensure editor is fully initialized
+      const timerId = setTimeout(() => {
+        if (isContentReady && editor) {
+          setupClickHandlers();
+        }
+      }, 200);
+      
+      return () => clearTimeout(timerId);
+    }, [editor, isContentReady]);
+    
+    return null;
+  }
 
   return (
     <div className={cn("border rounded-md", className)} ref={editorContainerRef}>
@@ -263,10 +263,16 @@ export function LexicalEditor({
           }}
         />
         
-        {/* Handle timestamp highlighting */}
-        {currentTimeInSeconds !== undefined && (
-          <TimestampHighlighter currentTimeInSeconds={currentTimeInSeconds} />
+        {/* Handle timestamp highlighting based on current time */}
+        {currentTimeInSeconds !== undefined && normalizedSegments.length > 0 && (
+          <TimestampHighlighter 
+            currentTimeInSeconds={currentTimeInSeconds} 
+            segments={normalizedSegments}
+          />
         )}
+        
+        {/* Add click handling for segments */}
+        {onJumpToTime && <SegmentClickPlugin />}
         
         <OnChangePlugin
           onChange={(editorState, editor) => {

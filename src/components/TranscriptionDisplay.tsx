@@ -1,5 +1,5 @@
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -10,6 +10,7 @@ import { LexicalEditor } from "@/components/editor/LexicalEditor";
 import { AudioPlayer } from "@/components/editor/AudioPlayer";
 import { ExportOptions } from "@/components/editor/ExportOptions";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
+import { formatTimestamp } from "@/utils/audioSyncUtils";
 import { useSubscription } from "@/context/SubscriptionContext";
 
 interface TranscriptionDisplayProps {
@@ -57,13 +58,16 @@ const TranscriptionDisplay = ({
   segments = [],
   onReset 
 }: TranscriptionDisplayProps) => {
+  // State management
   const [copied, setCopied] = useState(false);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [editorReady, setEditorReady] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
+  // Handle copy action
   const handleCopy = () => {
     navigator.clipboard.writeText(transcript);
     setCopied(true);
@@ -71,6 +75,7 @@ const TranscriptionDisplay = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Handle editor mounting
   const handleEditorMount = (editorInstance: LexicalEditorType) => {
     console.log("Editor mounted successfully");
     setEditor(editorInstance);
@@ -81,13 +86,20 @@ const TranscriptionDisplay = ({
     // Handle editor changes if needed
   };
 
+  // Handle time updates from the audio player
   const handleTimeUpdate = (time: number) => {
     setCurrentTime(time);
   };
 
-  const jumpToTime = (time: number) => {
-    // This would be called when clicking on a paragraph with a timestamp
+  // Handle jump to time from transcript segments
+  const handleJumpToTime = (time: number) => {
     setCurrentTime(time);
+    // The actual jump will be handled by the AudioPlayer component
+  };
+
+  // Handle playback state change
+  const handlePlaybackStateChange = (playing: boolean) => {
+    setIsPlaying(playing);
   };
 
   // Extract statistics from the transcript
@@ -96,12 +108,20 @@ const TranscriptionDisplay = ({
 
   // Format audio duration as a user-friendly string
   const formattedDuration = audioDuration !== null ? formatAudioDuration(audioDuration) : null;
+  const currentTimeFormatted = currentTime !== null ? formatTimestamp(currentTime) : "00:00";
 
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-lg">
       <div className="p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold truncate max-w-[60%]">{displayTitle}</h2>
+          <div className="flex flex-col">
+            <h2 className="text-xl font-bold truncate max-w-[60%]">{displayTitle}</h2>
+            {isPlaying && currentTime !== null && (
+              <span className="text-xs text-muted-foreground mt-1">
+                Currently at {currentTimeFormatted}
+              </span>
+            )}
+          </div>
           <div className="flex space-x-2">
             <Button variant="outline" onClick={handleCopy}>
               <Copy className="w-4 h-4 mr-2" />
@@ -142,26 +162,28 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
+        {/* Audio Player (placed before editor for better UX) */}
+        {audioUrl && (
+          <div className="mb-4">
+            <AudioPlayer 
+              src={audioUrl} 
+              onTimeUpdate={handleTimeUpdate} 
+              onJumpToTime={handleJumpToTime}
+              onPlaybackStateChange={handlePlaybackStateChange}
+            />
+          </div>
+        )}
+
         {/* Lexical Editor */}
         <LexicalEditor 
           initialText={transcript}
           segments={segments}
-          className="mb-4"
+          className="mt-4"
           onEditorMount={handleEditorMount}
           onEditorChange={handleEditorChange}
           currentTimeInSeconds={currentTime}
+          onJumpToTime={handleJumpToTime}
         />
-        
-        {/* Audio Player */}
-        {audioUrl && (
-          <div className="mt-4">
-            <AudioPlayer 
-              src={audioUrl} 
-              onTimeUpdate={handleTimeUpdate} 
-              onJumpToTime={jumpToTime}
-            />
-          </div>
-        )}
         
         <div className="mt-6 text-center">
           <Button onClick={onReset}>Transcribe Another File</Button>
