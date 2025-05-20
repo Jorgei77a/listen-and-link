@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -32,22 +32,22 @@ interface TranscriptionDisplayProps {
 }
 
 /**
- * Format transcript text to improve readability
+ * Format raw transcript text with basic paragraphs for readability
  * - Add proper paragraph breaks
  * - Format potential speaker labels
- * - Convert timestamps to markdown format
+ * - Preserve potential timestamps
  */
-const formatTranscript = (text: string): string => {
+const formatTextWithParagraphs = (text: string): string => {
   if (!text) return "";
   
-  // Add line breaks after sentences
+  // Add basic paragraph structure for readability
   let formatted = text
     // Add paragraph breaks after sentences (periods followed by spaces)
     .replace(/\.\s+/g, '.\n\n')
     // Format potential speaker labels (NAME: text)
-    .replace(/([A-Z][a-z]+):\s+/g, '\n\n**$1**: ')
-    // Format potential timestamps ([00:00:00])
-    .replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, '\n\n*[$1]* ');
+    .replace(/([A-Z][a-z]+):\s+/g, '$1: ')
+    // Preserve timestamps ([00:00:00]) 
+    .replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, '[$1] ');
 
   // Clean up excessive line breaks
   formatted = formatted
@@ -69,23 +69,30 @@ const TranscriptionDisplay = ({
   const [editedContent, setEditedContent] = useState<string>("");
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const displayTitle = customTitle || fileName.split('.')[0];
-  const formattedTranscript = formatTranscript(transcript);
+  
+  // Process the raw transcript with basic paragraph formatting only
+  const formattedText = formatTextWithParagraphs(transcript);
 
   // Initialize edited content from formatted transcript
   useEffect(() => {
-    setEditedContent(formattedTranscript);
+    // Initialize the editor with formatted text - no Markdown conversion
+    setEditedContent(formattedText);
     
-    // Extract any timestamps from the transcript
+    // Extract any timestamps from the transcript for audio sync
     const extractedSegments = extractTimestamps(transcript);
     setSegments(extractedSegments);
-  }, [transcript, formattedTranscript]);
+  }, [transcript, formattedText]);
 
   // Get subscription information
   const { getTierLimits, currentTier } = useSubscription();
   const availableFormats = getTierLimits('exportFormats');
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(editedContent || transcript);
+    // Copy the edited content from Tiptap (HTML) as plain text
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = editedContent;
+    navigator.clipboard.writeText(tempDiv.textContent || transcript);
+    
     setCopied(true);
     toast.success("Transcript copied to clipboard!");
     setTimeout(() => setCopied(false), 2000);
@@ -107,12 +114,18 @@ const TranscriptionDisplay = ({
       return;
     }
     
-    // Decide which text to download - use the edited content if available
-    const textToDownload = format === 'plain' 
-      ? editedContent.replace(/<[^>]*>/g, '') || transcript 
-      : editedContent || formattedTranscript;
-      
-    const fileExtension = format === 'plain' ? 'txt' : 'md';
+    // For plain text export, convert HTML to plain text
+    let textToDownload = transcript; // Default to original transcript
+    
+    if (editedContent) {
+      // Convert HTML to plain text if we have edited content
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = editedContent;
+      textToDownload = tempDiv.textContent || transcript;
+    }
+    
+    // File extension is always txt since we're not using Markdown anymore
+    const fileExtension = 'txt';
     
     const element = document.createElement("a");
     const file = new Blob([textToDownload], { type: "text/plain" });
@@ -121,7 +134,7 @@ const TranscriptionDisplay = ({
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
-    toast.success(`Transcript downloaded as ${format === 'plain' ? 'text' : 'markdown'}!`);
+    toast.success(`Transcript downloaded as text!`);
   };
 
   const handleEditorChange = (html: string) => {
@@ -143,7 +156,7 @@ const TranscriptionDisplay = ({
   };
 
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
-  const paragraphs = formattedTranscript.split(/\n\s*\n/).filter(Boolean).length;
+  const paragraphs = formattedText.split(/\n\s*\n/).filter(Boolean).length;
 
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-lg">
@@ -174,16 +187,16 @@ const TranscriptionDisplay = ({
                   
                   {availableFormats.includes('markdown') ? (
                     <button 
-                      onClick={() => handleDownload('markdown')} 
+                      onClick={() => handleDownload('plain')} 
                       className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
                     >
                       <FileText className="w-3 h-3 mr-1" />
-                      Markdown (.md)
+                      Text with Formatting (.txt)
                     </button>
                   ) : (
                     <div className="block w-full text-left px-4 py-2 text-sm text-gray-400 bg-gray-50 flex items-center">
                       <Lock className="w-3 h-3 mr-1" />
-                      Markdown (.md)
+                      Text with Formatting (.txt)
                       <Badge className="ml-1 text-[10px]" variant="outline">Pro+</Badge>
                     </div>
                   )}
@@ -232,7 +245,7 @@ const TranscriptionDisplay = ({
           
           <TabsContent value="editor">
             <TranscriptEditor 
-              content={formattedTranscript}
+              content={formattedText}
               onChange={handleEditorChange}
               onTextClick={handleTextClick}
             />

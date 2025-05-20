@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Heading from '@tiptap/extension-heading'
@@ -60,9 +60,14 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
     setIsMounted(true)
   }, [])
 
+  // Update editor content when the content prop changes
   useEffect(() => {
-    if (editor && content && editor.getHTML() !== content) {
-      editor.commands.setContent(content)
+    if (editor && content) {
+      // Only update if content differs to avoid cursor position issues
+      const currentContent = editor.getHTML()
+      if (currentContent !== content) {
+        editor.commands.setContent(content)
+      }
     }
   }, [content, editor])
 
@@ -116,7 +121,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           </MenuButton>
           
           <MenuButton 
-            onClick={() => editor.chain().focus().toggleMark('underline').run()}
+            onClick={() => editor.chain().focus().toggleUnderline().run()}
             active={editor.isActive('underline')}
           >
             <UnderlineIcon className="h-4 w-4" />
