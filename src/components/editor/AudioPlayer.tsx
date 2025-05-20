@@ -8,7 +8,7 @@ interface AudioPlayerProps {
   src: string;
   className?: string;
   onTimeUpdate?: (currentTime: number) => void;
-  onJumpToTime?: (time: number) => void;
+  onJumpToTime?: (callback: (time: number) => void) => void;
 }
 
 export function AudioPlayer({ 
@@ -135,7 +135,8 @@ export function AudioPlayer({
   // Effect to handle external time jumps from text clicks
   useEffect(() => {
     if (onJumpToTime && audioRef.current) {
-      onJumpToTime((time: number) => jumpToTime(time));
+      // Register the jumpToTime function as a callback
+      onJumpToTime(jumpToTime);
     }
   }, [onJumpToTime]);
 

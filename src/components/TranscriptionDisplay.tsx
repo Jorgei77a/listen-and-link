@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -61,7 +60,7 @@ const TranscriptionDisplay = ({
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [editorReady, setEditorReady] = useState(false);
-  const audioPlayerCallbackRef = useRef<(time: number) => void | null>(null);
+  const audioPlayerCallbackRef = useRef<((time: number) => void) | null>(null);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
