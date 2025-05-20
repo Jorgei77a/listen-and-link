@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
@@ -6,7 +5,7 @@ import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { ListItemNode, ListNode } from "@lexical/list";
-import { HeadingNode } from "@lexical/rich-text"; // Add import for HeadingNode
+import { HeadingNode } from "@lexical/rich-text";
 import LexicalErrorBoundary from "@lexical/react/LexicalErrorBoundary";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { EditorToolbar } from "./EditorToolbar";
@@ -155,45 +154,6 @@ function InitializeContent({
   return null;
 }
 
-// Component to handle timestamp highlighting based on current audio time
-function TimestampHighlighter({ currentTimeInSeconds }: { currentTimeInSeconds?: number | null }) {
-  const [editor] = useLexicalComposerContext();
-  
-  useEffect(() => {
-    if (!currentTimeInSeconds || !editor) return;
-    
-    editor.update(() => {
-      const root = $getRoot();
-      const paragraphs = root.getChildren();
-      
-      paragraphs.forEach((paragraph) => {
-        const element = editor.getElementByKey(paragraph.getKey());
-        if (!element) return;
-        
-        // Check if this paragraph has timestamp data attributes
-        const start = parseFloat(element.getAttribute('data-start') || '0');
-        const end = parseFloat(element.getAttribute('data-end') || '0');
-        
-        if (start <= currentTimeInSeconds && currentTimeInSeconds <= end) {
-          element.classList.add('bg-primary/10', 'transition-colors');
-          
-          // Scroll into view if needed
-          const rect = element.getBoundingClientRect();
-          const parentRect = element.parentElement?.getBoundingClientRect();
-          
-          if (parentRect && (rect.bottom > parentRect.bottom || rect.top < parentRect.top)) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        } else {
-          element.classList.remove('bg-primary/10');
-        }
-      });
-    });
-  }, [currentTimeInSeconds, editor]);
-  
-  return null;
-}
-
 export function LexicalEditor({
   initialText,
   segments,
@@ -230,7 +190,7 @@ export function LexicalEditor({
       console.error("Lexical Editor Error:", error);
     },
     editable: !readOnly,
-    nodes: [ListNode, ListItemNode, HeadingNode], // Add HeadingNode to the nodes array
+    nodes: [ListNode, ListItemNode, HeadingNode],
   };
 
   return (
@@ -262,11 +222,6 @@ export function LexicalEditor({
             setIsContentReady(true);
           }}
         />
-        
-        {/* Handle timestamp highlighting */}
-        {currentTimeInSeconds !== undefined && (
-          <TimestampHighlighter currentTimeInSeconds={currentTimeInSeconds} />
-        )}
         
         <OnChangePlugin
           onChange={(editorState, editor) => {

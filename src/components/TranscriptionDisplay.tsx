@@ -1,16 +1,16 @@
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Clock, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
-import { LexicalEditor } from "@/components/editor/LexicalEditor";
-import { AudioPlayer } from "@/components/editor/AudioPlayer";
 import { ExportOptions } from "@/components/editor/ExportOptions";
+import { AudioPlayer } from "@/components/editor/AudioPlayer";
+import { InteractiveTranscript } from "@/components/editor/InteractiveTranscript";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
-import { useSubscription } from "@/context/SubscriptionContext";
+import { TranscriptSegment } from "@/utils/transcriptSyncUtils";
 
 interface TranscriptionDisplayProps {
   transcript: string;
@@ -18,23 +18,16 @@ interface TranscriptionDisplayProps {
   customTitle?: string;
   audioDuration?: number | null;
   audioUrl?: string;
-  segments?: Array<{
-    start: number;
-    end: number;
-    text: string;
-  }>;
+  segments?: TranscriptSegment[];
   onReset: () => void;
 }
 
 /**
  * Format audio duration into a human-readable string
- * @param seconds - Duration in seconds
- * @returns Formatted string like "8 mins 20 secs" or "45 secs"
  */
 const formatAudioDuration = (seconds: number | null): string => {
   if (seconds === null || seconds === undefined) return "";
   
-  // Force conversion to number, then round to nearest integer to eliminate decimals
   const totalSeconds = Math.round(Number(seconds));
   const minutes = Math.floor(totalSeconds / 60);
   const remainingSeconds = totalSeconds % 60;
@@ -58,12 +51,13 @@ const TranscriptionDisplay = ({
   onReset 
 }: TranscriptionDisplayProps) => {
   const [copied, setCopied] = useState(false);
-  const [currentTime, setCurrentTime] = useState<number | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [jumpToTime, setJumpToTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
-  const [editorReady, setEditorReady] = useState(false);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
+  // Handle copy button click
   const handleCopy = () => {
     navigator.clipboard.writeText(transcript);
     setCopied(true);
@@ -71,23 +65,19 @@ const TranscriptionDisplay = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Handle editor mount
   const handleEditorMount = (editorInstance: LexicalEditorType) => {
-    console.log("Editor mounted successfully");
     setEditor(editorInstance);
-    setEditorReady(true);
   };
 
-  const handleEditorChange = (editorState: EditorState) => {
-    // Handle editor changes if needed
-  };
-
+  // Handle audio time update
   const handleTimeUpdate = (time: number) => {
     setCurrentTime(time);
   };
 
-  const jumpToTime = (time: number) => {
-    // This would be called when clicking on a paragraph with a timestamp
-    setCurrentTime(time);
+  // Handle segment click to jump to specific timestamp
+  const handleSegmentClick = (segment: TranscriptSegment) => {
+    setJumpToTime(segment.start);
   };
 
   // Extract statistics from the transcript
@@ -141,24 +131,26 @@ const TranscriptionDisplay = ({
             </>
           )}
         </div>
-
-        {/* Lexical Editor */}
-        <LexicalEditor 
-          initialText={transcript}
-          segments={segments}
-          className="mb-4"
-          onEditorMount={handleEditorMount}
-          onEditorChange={handleEditorChange}
-          currentTimeInSeconds={currentTime}
-        />
+        
+        {/* Interactive Transcript */}
+        {segments && segments.length > 0 && (
+          <div className="mb-6 border rounded-md">
+            <InteractiveTranscript
+              segments={segments}
+              currentTime={currentTime}
+              onSegmentClick={handleSegmentClick}
+              className="h-[300px]"
+            />
+          </div>
+        )}
         
         {/* Audio Player */}
         {audioUrl && (
-          <div className="mt-4">
+          <div className="mt-4 mb-6">
             <AudioPlayer 
               src={audioUrl} 
-              onTimeUpdate={handleTimeUpdate} 
-              onJumpToTime={jumpToTime}
+              onTimeUpdate={handleTimeUpdate}
+              jumpToTime={jumpToTime}
             />
           </div>
         )}
