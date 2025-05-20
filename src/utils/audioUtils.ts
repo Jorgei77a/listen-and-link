@@ -3,6 +3,11 @@
  * Utility functions for audio file analysis and processing
  */
 
+// Add a declaration for the WebKit AudioContext
+interface Window {
+  webkitAudioContext: typeof AudioContext;
+}
+
 /**
  * Get the precise duration of an audio file using Web Audio API
  * This returns a promise that resolves with the duration in seconds
@@ -10,7 +15,7 @@
 export const getAudioDuration = (file: File): Promise<number> => {
   return new Promise((resolve, reject) => {
     // Create audio context
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContext) {
       // Fallback to estimation if Web Audio API is not available
       const estimatedDuration = estimateAudioDuration(file);
