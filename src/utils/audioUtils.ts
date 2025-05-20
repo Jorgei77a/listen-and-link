@@ -110,14 +110,16 @@ export const estimateAudioDuration = (file: File): number => {
 };
 
 /**
- * Default buffer time configuration in seconds
+ * Buffer time configuration in seconds
  * - segmentEndBuffer: Extra time to add after a segment's end time (prevents cutting off)
  * - segmentLookaheadBuffer: Time to start highlighting the next segment before its start time
+ * - recoveryCheckInterval: How often to check for frozen state (ms)
  * - debugMode: Whether to show buffer timing information visually
  */
 export const DEFAULT_SEGMENT_BUFFERS = {
-  segmentEndBuffer: 1.5,      // 1.5 seconds additional playback after segment end
-  segmentLookaheadBuffer: 0.3, // Start highlighting next segment 0.3s before its start
+  segmentEndBuffer: 5.0,      // 5.0 seconds additional playback after segment end (increased from 1.5)
+  segmentLookaheadBuffer: 0.5, // Start highlighting next segment 0.5s before its start (increased from 0.3)
+  recoveryCheckInterval: 5000, // Check for frozen state every 5 seconds
   debugMode: false            // Set to true to enable visual buffer indicators
 };
 
@@ -168,4 +170,58 @@ export const findActiveSegment = (
   }
   
   return null; // No active segment found
+};
+
+/**
+ * Check if audio player is in frozen state by comparing timestamps
+ * @param lastUpdateTime Time of last observed time update
+ * @param isPlaying Whether player reports it's playing
+ * @returns boolean indicating if player might be frozen
+ */
+export const detectFrozenState = (
+  lastUpdateTime: number,
+  isPlaying: boolean
+): boolean => {
+  // If not playing, player isn't frozen
+  if (!isPlaying) return false;
+  
+  // If we haven't received a time update in 3 seconds while playing, 
+  // consider the player frozen
+  const timeSinceLastUpdate = Date.now() - lastUpdateTime;
+  return timeSinceLastUpdate > 3000;
+};
+
+/**
+ * Reset audio player to recover from frozen state
+ * @param audioElement HTML Audio element reference
+ * @returns Promise that resolves when reset is complete
+ */
+export const resetAudioPlayer = async (audioElement: HTMLAudioElement): Promise<void> => {
+  // Store current position and playing state
+  const currentTime = audioElement.currentTime;
+  const wasPlaying = !audioElement.paused;
+  
+  // Pause and reset element
+  try {
+    await audioElement.pause();
+    
+    // Small delay to allow browser to process
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Set time to slightly before where we were
+    const safeTime = Math.max(0, currentTime - 0.5);
+    audioElement.currentTime = safeTime;
+    
+    // If it was playing, resume
+    if (wasPlaying) {
+      await audioElement.play().catch(error => {
+        console.error("Error resuming after reset:", error);
+      });
+    }
+    
+    console.log("Audio player successfully reset");
+  } catch (error) {
+    console.error("Error during audio player reset:", error);
+    throw error;
+  }
 };

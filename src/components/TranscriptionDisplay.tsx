@@ -69,19 +69,52 @@ const TranscriptionDisplay = ({
   const isUpdatingFromEditorRef = useRef<boolean>(false);
   const currentTimeRef = useRef<number | null>(currentTime);
   const isFirstTimeUpdateRef = useRef<boolean>(true);
+  const timeoutIdsRef = useRef<number[]>([]);
   
-  // Configure optimized buffer settings - tuned for smooth playback
+  // Configure optimized buffer settings - increased buffer to 5 seconds
   const bufferSettings = {
     ...DEFAULT_SEGMENT_BUFFERS,
-    segmentEndBuffer: 1.5,      // 1.5 seconds extra time after segment ends
-    segmentLookaheadBuffer: 0.3, // Start highlighting next segment 0.3s early
-    debugMode: false            // Set to true for debugging buffer timing visuals
+    segmentEndBuffer: 5.0,        // 5 seconds extra time after segment ends (increased from 1.5s)
+    segmentLookaheadBuffer: 0.5,  // Start highlighting next segment 0.5s early (increased from 0.3s)
+    debugMode: false              // Set to true for debugging buffer timing visuals
   };
+  
+  // Clear a timeout and remove it from tracking
+  const clearTrackedTimeout = useCallback((id: number) => {
+    window.clearTimeout(id);
+    timeoutIdsRef.current = timeoutIdsRef.current.filter(t => t !== id);
+  }, []);
+  
+  // Create a tracked timeout
+  const createTrackedTimeout = useCallback((callback: () => void, delay: number): number => {
+    const id = window.setTimeout(() => {
+      callback();
+      // Auto-remove from tracking after execution
+      timeoutIdsRef.current = timeoutIdsRef.current.filter(t => t !== id);
+    }, delay);
+    
+    // Add to tracked timeouts
+    timeoutIdsRef.current.push(id);
+    return id;
+  }, []);
+  
+  // Clear all tracked timeouts
+  const clearAllTrackedTimeouts = useCallback(() => {
+    timeoutIdsRef.current.forEach(id => window.clearTimeout(id));
+    timeoutIdsRef.current = [];
+  }, []);
   
   // Keep currentTimeRef in sync
   useEffect(() => {
     currentTimeRef.current = currentTime;
   }, [currentTime]);
+  
+  // Clean up timeouts on unmount
+  useEffect(() => {
+    return () => {
+      clearAllTrackedTimeouts();
+    };
+  }, [clearAllTrackedTimeouts]);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
@@ -102,7 +135,7 @@ const TranscriptionDisplay = ({
     // Handle editor changes if needed
   }, []);
 
-  // Stabilized time update handler from AudioPlayer with heavy debounce
+  // Improved time update handler from AudioPlayer
   const handleTimeUpdate = useCallback((time: number) => {
     // Skip first update as it's often triggered on load with time=0
     if (isFirstTimeUpdateRef.current) {
@@ -122,19 +155,19 @@ const TranscriptionDisplay = ({
     }
     
     // Reset the lock after a delay
-    setTimeout(() => {
+    createTrackedTimeout(() => {
       isUpdatingFromPlayerRef.current = false;
-    }, 300); // Increased debounce time to prevent loops
-  }, []);
+    }, 500); // Increased debounce time to prevent loops
+  }, [createTrackedTimeout]);
 
-  // Heavily debounced segment click handler
+  // Improved segment click handler with better debouncing
   const handleSegmentClick = useCallback((time: number) => {
     // Prevent multiple rapid clicks or updates while player is updating editor
     if (isUpdatingFromPlayerRef.current) return;
     
     // Strong debounce for rapid clicks
     const now = Date.now();
-    if (now - lastSegmentClickTimeRef.current < 1000) {
+    if (now - lastSegmentClickTimeRef.current < 1200) {
       return;
     }
     lastSegmentClickTimeRef.current = now;
@@ -147,20 +180,20 @@ const TranscriptionDisplay = ({
       setCurrentTime(time);
       
       // Call the audio player's jumpToTime function with delay to ensure state is updated
-      setTimeout(() => {
+      createTrackedTimeout(() => {
         if (audioPlayerCallbackRef.current) {
           audioPlayerCallbackRef.current(time);
         }
-      }, 50);
+      }, 100);
     }
     
-    // Reset the lock after a delay
-    setTimeout(() => {
+    // Reset the lock after a longer delay
+    createTrackedTimeout(() => {
       isUpdatingFromEditorRef.current = false;
-    }, 300);
-  }, []);
+    }, 800);
+  }, [createTrackedTimeout]);
 
-  // Register the jump-to-time callback with cleanup
+  // Improved jump-to-time callback registration with cleanup
   const handleJumpToTimeRegistration = useCallback((callback: (time: number) => void) => {
     // Store the callback in a stable ref that won't change
     audioPlayerCallbackRef.current = callback;
@@ -225,7 +258,7 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
-        {/* Lexical Editor with optimized buffer settings */}
+        {/* Lexical Editor with improved 5-second buffer settings */}
         <LexicalEditor 
           initialText={transcript}
           segments={segments}
@@ -248,7 +281,7 @@ const TranscriptionDisplay = ({
           </div>
         )}
         
-        {/* Debug information - includes buffer settings */}
+        {/* Debug information - includes improved buffer settings */}
         <div className="mt-4 p-2 bg-gray-50 rounded-md text-xs text-muted-foreground">
           <p>Status: {audioUrl ? "✅ Audio loaded" : "❌ No audio"}, Editor: {editorReady ? "✅ Ready" : "❌ Loading"}, Player: {playerReady ? "✅ Ready" : "❌ Loading"}</p>
           {currentTime !== null && <p>Position: {currentTime.toFixed(2)}s, Buffer: {bufferSettings.segmentEndBuffer.toFixed(1)}s</p>}
