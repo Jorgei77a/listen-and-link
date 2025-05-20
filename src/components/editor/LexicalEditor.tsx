@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useState } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
@@ -5,6 +6,7 @@ import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { ListItemNode, ListNode } from "@lexical/list";
+import { HeadingNode } from "@lexical/rich-text"; // Add import for HeadingNode
 import LexicalErrorBoundary from "@lexical/react/LexicalErrorBoundary";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { EditorToolbar } from "./EditorToolbar";
@@ -228,7 +230,7 @@ export function LexicalEditor({
       console.error("Lexical Editor Error:", error);
     },
     editable: !readOnly,
-    nodes: [ListNode, ListItemNode],
+    nodes: [ListNode, ListItemNode, HeadingNode], // Add HeadingNode to the nodes array
   };
 
   return (
