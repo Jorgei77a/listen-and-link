@@ -1,5 +1,5 @@
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
@@ -15,10 +15,12 @@ import {
   EditorState, 
   LexicalEditor as LexicalEditorType,
   ParagraphNode,
-  LexicalNode 
+  LexicalNode,
+  $getSelection
 } from "lexical";
 import { cn } from "@/lib/utils";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface LexicalEditorProps {
   initialText: string;
@@ -78,6 +80,8 @@ export function LexicalEditor({
   currentTimeInSeconds,
 }: LexicalEditorProps) {
   const editorRef = useRef<LexicalEditorType | null>(null);
+  const [isContentLoaded, setIsContentLoaded] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
   
   const initialConfig = {
     namespace: "TranscriptEditor",
@@ -103,7 +107,6 @@ export function LexicalEditor({
       console.error(error);
     },
     editable: !readOnly,
-    // Register the list nodes
     nodes: [ListNode, ListItemNode],
   };
 
@@ -149,6 +152,9 @@ export function LexicalEditor({
       onEditorMount(editorRef.current);
     }
     
+    setIsInitializing(true);
+    
+    // Populate the editor with initial content
     editorRef.current.update(() => {
       const root = $getRoot();
       // Clear any existing content
@@ -175,20 +181,74 @@ export function LexicalEditor({
         root.append(paragraphNode);
       });
     });
+    
+    // Force editor update and fix visibility after a small delay
+    setTimeout(() => {
+      if (editorRef.current) {
+        // Force a repaint by reading the editor state
+        editorRef.current.getEditorState().read(() => {
+          // This ensures the editor state is processed
+          const root = $getRoot();
+          const hasContent = root.getChildrenSize() > 0;
+          console.log("Editor content loaded:", hasContent);
+        });
+        
+        // Apply a focus/blur cycle to ensure content renders
+        // This mimics what happens when a user clicks
+        editorRef.current.focus();
+        
+        // Mark content as loaded
+        setIsContentLoaded(true);
+        setIsInitializing(false);
+      }
+    }, 100);
+    
   }, [initialText, segments, onEditorMount]);
+
+  // Force update after editor and content are loaded
+  useEffect(() => {
+    if (isContentLoaded && editorRef.current) {
+      editorRef.current.update(() => {
+        // Force update to ensure content is visible
+        const root = $getRoot();
+        const paragraphs = root.getChildren();
+        
+        // Apply timestamp data attributes to DOM again for certainty
+        paragraphs.forEach((paragraph: LexicalNode) => {
+          if ((paragraph as any).timestampData) {
+            const element = editorRef.current?.getElementByKey(paragraph.getKey());
+            if (element) {
+              element.setAttribute('data-start', (paragraph as any).timestampData.start);
+              element.setAttribute('data-end', (paragraph as any).timestampData.end);
+            }
+          }
+        });
+      });
+    }
+  }, [isContentLoaded]);
 
   return (
     <div className={cn("border rounded-md", className)}>
       <LexicalComposer initialConfig={initialConfig}>
         <EditorToolbar />
         <div className="relative bg-muted/30 rounded-md">
-          <RichTextPlugin
-            contentEditable={
-              <ContentEditable className="min-h-[200px] max-h-[400px] overflow-y-auto p-4 outline-none" />
-            }
-            placeholder={<div className="absolute top-[15px] left-[15px] text-muted-foreground">Start editing...</div>}
-            ErrorBoundary={LexicalErrorBoundary}
-          />
+          {isInitializing ? (
+            <div className="min-h-[200px] max-h-[400px] p-4">
+              <Skeleton className="h-4 w-3/4 mb-2" />
+              <Skeleton className="h-4 w-full mb-2" />
+              <Skeleton className="h-4 w-5/6 mb-2" />
+              <Skeleton className="h-4 w-4/5 mb-2" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+          ) : (
+            <RichTextPlugin
+              contentEditable={
+                <ContentEditable className="min-h-[200px] max-h-[400px] overflow-y-auto p-4 outline-none" />
+              }
+              placeholder={<div className="absolute top-[15px] left-[15px] text-muted-foreground">Start editing...</div>}
+              ErrorBoundary={LexicalErrorBoundary}
+            />
+          )}
         </div>
         <HistoryPlugin />
         <ListPlugin />
