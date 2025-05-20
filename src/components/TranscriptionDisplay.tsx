@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -65,7 +64,9 @@ const TranscriptionDisplay = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleDownload = (format: 'plain' | 'markdown') => {
+  type ExportFormat = 'plain' | 'markdown';
+
+  const handleDownload = (format: ExportFormat) => {
     // Check if format is available in the current tier
     if (!availableFormats.includes(format)) {
       toast.error(`${format} export is not available on your ${currentTier} plan.`, {

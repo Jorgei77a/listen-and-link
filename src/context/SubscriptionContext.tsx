@@ -8,23 +8,23 @@ import { toast } from "sonner";
 export const TIER_LIMITS = {
   free: {
     maxFileSize: 10 * 1024 * 1024, // 10MB
-    exportFormats: ['plain'],
+    exportFormats: ['plain'] as const,
     customTitles: false,
   },
   pro: {
     maxFileSize: 30 * 1024 * 1024, // 30MB
-    exportFormats: ['plain', 'markdown'],
+    exportFormats: ['plain', 'markdown'] as const,
     customTitles: true,
   },
   business: {
     maxFileSize: 100 * 1024 * 1024, // 100MB
-    exportFormats: ['plain', 'markdown'],
+    exportFormats: ['plain', 'markdown'] as const,
     customTitles: true,
     speakerDetection: true,
   },
   enterprise: {
     maxFileSize: 500 * 1024 * 1024, // 500MB
-    exportFormats: ['plain', 'markdown'],
+    exportFormats: ['plain', 'markdown'] as const,
     customTitles: true,
     speakerDetection: true,
     batchProcessing: true,
@@ -32,13 +32,14 @@ export const TIER_LIMITS = {
   },
 } as const;
 
-type TierDetails = typeof TIER_LIMITS.free;
+type TierLimits = typeof TIER_LIMITS;
+type TierDetails<T extends SubscriptionTier> = TierLimits[T];
 
 interface SubscriptionContextType {
   currentTier: SubscriptionTier;
   isLoading: boolean;
   hasFeature: (featureKey: string) => boolean;
-  getTierLimits: <K extends keyof TierDetails>(limitKey: K) => TierDetails[K];
+  getTierLimits: <K extends keyof TierDetails<SubscriptionTier>>(limitKey: K) => any;
   tiers: SubscriptionInfo[];
   userSubscription: UserSubscription | null;
 }
@@ -97,11 +98,12 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
           return {
             ...tier,
+            name: tier.name as SubscriptionTier, // Cast the name to SubscriptionTier
             features: tierFeatures,
           };
         });
 
-        setTiers(processedTiers);
+        setTiers(processedTiers as SubscriptionInfo[]);
         setFeatures(featuresData);
 
         // In a real app, we would fetch the user's subscription here
@@ -131,7 +133,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   };
 
   // Get tier-specific limits
-  const getTierLimits = <K extends keyof TierDetails>(limitKey: K): TierDetails[K] => {
+  const getTierLimits = <K extends keyof TierDetails<SubscriptionTier>>(limitKey: K): any => {
     return TIER_LIMITS[currentTier][limitKey];
   };
 
