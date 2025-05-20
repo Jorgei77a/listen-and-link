@@ -408,6 +408,7 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
         </div>
       </Card>
 
+      {/* Fix the Dialog implementation - never render it conditionally at the root level */}
       <Dialog open={dialogOpen} onOpenChange={(open) => {
         if (!uploading) {
           setDialogOpen(open);
