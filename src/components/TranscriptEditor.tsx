@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -13,7 +14,6 @@ import {
   Heading1,
   Heading2,
   Heading3,
-  ListOrdered,
   List,
   Undo,
   Redo,
