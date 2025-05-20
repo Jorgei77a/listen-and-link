@@ -1,4 +1,3 @@
-
 import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -272,6 +271,9 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
   };
 
   const formatTime = (seconds: number): string => {
+    // Ensure we're working with an integer
+    seconds = Math.round(seconds);
+    
     if (seconds < 60) return `${seconds} seconds`;
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;

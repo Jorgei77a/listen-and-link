@@ -52,7 +52,7 @@ const formatTranscript = (text: string): string => {
 const formatAudioDuration = (seconds: number | null): string => {
   if (seconds === null || seconds === undefined) return "";
   
-  // Explicitly convert to number and round to nearest second to ensure no decimal places
+  // Force conversion to number, then round to nearest integer to eliminate decimals
   const totalSeconds = Math.round(Number(seconds));
   const minutes = Math.floor(totalSeconds / 60);
   const remainingSeconds = totalSeconds % 60;

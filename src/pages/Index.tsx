@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -43,8 +44,8 @@ const Index = () => {
           
           // Store the audio duration - make sure to round it here
           if (data.audio_duration) {
-            // Explicitly round the duration to avoid decimal issues
-            const roundedDuration = Number(data.audio_duration);
+            // Round to nearest integer to ensure no decimal places
+            const roundedDuration = Math.round(Number(data.audio_duration));
             setAudioDuration(roundedDuration);
             
             // Update monthly usage with the actual audio duration from the server
