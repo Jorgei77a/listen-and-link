@@ -1,9 +1,11 @@
+
 import { useEffect, useRef } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
+import { ListItemNode, ListNode } from "@lexical/list";
 import LexicalErrorBoundary from "@lexical/react/LexicalErrorBoundary";
 import { EditorToolbar } from "./EditorToolbar";
 import { 
@@ -101,6 +103,8 @@ export function LexicalEditor({
       console.error(error);
     },
     editable: !readOnly,
+    // Register the list nodes
+    nodes: [ListNode, ListItemNode],
   };
 
   // Highlight the paragraph that matches the current audio time
