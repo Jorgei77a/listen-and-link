@@ -72,7 +72,7 @@ const TranscriptionDisplay = ({
   };
 
   const handleEditorMount = (editorInstance: LexicalEditorType) => {
-    console.log("Editor mounted successfully");
+    console.log("🔍 TranscriptionDisplay: Editor mounted successfully");
     setEditor(editorInstance);
     setEditorReady(true);
   };
@@ -82,22 +82,34 @@ const TranscriptionDisplay = ({
   };
 
   const handleTimeUpdate = (time: number) => {
+    console.log(`🔍 TranscriptionDisplay: Time updated from audio player: ${time.toFixed(2)}s`);
     setCurrentTime(time);
   };
 
   // This function will be called when a text segment is clicked
   const handleSegmentClick = useCallback((time: number) => {
+    console.log(`🔍 TranscriptionDisplay: Segment clicked at time ${time.toFixed(2)}s`);
     setCurrentTime(time);
+    
     // Call the audio player's jumpToTime function
     if (audioPlayerCallbackRef.current) {
+      console.log(`🔍 TranscriptionDisplay: Calling audio player jumpToTime with ${time.toFixed(2)}s`);
       audioPlayerCallbackRef.current(time);
+    } else {
+      console.error("🔍 TranscriptionDisplay: Audio player callback is null");
     }
   }, []);
 
   // Register the jump-to-time callback from the audio player
   const handleJumpToTimeRegistration = useCallback((callback: (time: number) => void) => {
+    console.log("🔍 TranscriptionDisplay: Jump-to-time callback registered from audio player");
     audioPlayerCallbackRef.current = callback;
   }, []);
+
+  // Debug effect to monitor audioPlayerCallbackRef changes
+  useEffect(() => {
+    console.log(`🔍 TranscriptionDisplay: audioPlayerCallbackRef is now ${audioPlayerCallbackRef.current ? "set" : "null"}`);
+  }, [audioPlayerCallbackRef.current]);
 
   // Extract statistics from the transcript
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
@@ -172,6 +184,15 @@ const TranscriptionDisplay = ({
             />
           </div>
         )}
+        
+        {/* Debug information */}
+        <div className="mt-4 p-2 bg-gray-50 rounded-md text-xs text-muted-foreground">
+          <p>Audio URL: {audioUrl ? "✅ Set" : "❌ Not set"}</p>
+          <p>Current Time: {currentTime !== null ? `${currentTime.toFixed(2)}s` : "Not set"}</p>
+          <p>Editor Ready: {editorReady ? "✅ Yes" : "❌ No"}</p>
+          <p>Audio Player Callback: {audioPlayerCallbackRef.current ? "✅ Registered" : "❌ Not registered"}</p>
+          <p>Segments: {segments.length}</p>
+        </div>
         
         <div className="mt-6 text-center">
           <Button onClick={onReset}>Transcribe Another File</Button>
