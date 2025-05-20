@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -9,6 +8,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { SubscriptionBadge } from "@/components/SubscriptionBadge";
 import { useSubscription } from "@/context/SubscriptionContext";
+import { Json } from "@/integrations/supabase/types";
 
 interface TranscriptionSegment {
   start: number;
@@ -64,50 +64,74 @@ const Index = () => {
         }
         
         if (data) {
-          const transcription = data as Transcription;
+          // Cast the data to the appropriate types
+          const transcriptionData = data as unknown as {
+            id: string;
+            file_name: string;
+            file_path: string;
+            file_size: number;
+            custom_title: string | null;
+            status: string;
+            transcript: string | null;
+            error: string | null;
+            progress_message: string | null;
+            created_at: string | null;
+            updated_at: string | null;
+            audio_duration: number | null;
+            segments: Json | null;
+          };
           
-          if (transcription.status === 'completed' && transcription.transcript) {
-            setTranscript(transcription.transcript);
+          if (transcriptionData.status === 'completed' && transcriptionData.transcript) {
+            setTranscript(transcriptionData.transcript);
             setIsProcessing(false);
             
             // Parse segments if available - note that segments may not exist in database yet
             let parsedSegments: TranscriptionSegment[] = [];
             
-            // We'll generate basic segments from the transcript if needed
-            if (!transcription.segments) {
-              console.log('No segments found, generating basic segments from transcript');
+            // Parse the segments from the JSON data if available
+            if (transcriptionData.segments) {
+              try {
+                if (Array.isArray(transcriptionData.segments)) {
+                  // Convert Json array to TranscriptionSegment array
+                  parsedSegments = transcriptionData.segments.map((segment: any) => ({
+                    start: Number(segment.start),
+                    end: Number(segment.end),
+                    text: String(segment.text)
+                  }));
+                }
+              } catch (segmentError) {
+                console.error('Error parsing segments:', segmentError);
+              }
+            }
+            
+            // If no valid segments could be parsed, generate basic segments from the transcript
+            if (parsedSegments.length === 0 && transcriptionData.transcript) {
+              console.log('No segments found or error parsing, generating basic segments from transcript');
               
               // Simple sentence splitting for segments when no timestamp data is available
-              if (transcription.transcript) {
-                const sentences = transcription.transcript.split(/(?<=[.!?])\s+/).filter(Boolean);
-                let currentTime = 0;
-                const avgTimePerSentence = transcription.audio_duration ? 
-                  Math.max(1, transcription.audio_duration / sentences.length) : 3;
-                
-                parsedSegments = sentences.map((sentence, index) => {
-                  const segmentStart = currentTime;
-                  currentTime += avgTimePerSentence;
-                  return {
-                    start: segmentStart,
-                    end: currentTime,
-                    text: sentence.trim()
-                  };
-                });
-              }
-            } else {
-              // Handle segments if they exist in the response
-              parsedSegments = Array.isArray(transcription.segments) ? 
-                transcription.segments : 
-                [];
+              const sentences = transcriptionData.transcript.split(/(?<=[.!?])\s+/).filter(Boolean);
+              let currentTime = 0;
+              const avgTimePerSentence = transcriptionData.audio_duration ? 
+                Math.max(1, transcriptionData.audio_duration / sentences.length) : 3;
+              
+              parsedSegments = sentences.map((sentence, index) => {
+                const segmentStart = currentTime;
+                currentTime += avgTimePerSentence;
+                return {
+                  start: segmentStart,
+                  end: currentTime,
+                  text: sentence.trim()
+                };
+              });
             }
             
             setSegments(parsedSegments);
             
             // Create signed URL for the audio file
-            if (transcription.file_path) {
+            if (transcriptionData.file_path) {
               const { data: signedUrl } = await supabase.storage
                 .from('audio_files')
-                .createSignedUrl(transcription.file_path, 3600); // 1 hour expiry
+                .createSignedUrl(transcriptionData.file_path, 3600); // 1 hour expiry
                 
               if (signedUrl?.signedUrl) {
                 setAudioUrl(signedUrl.signedUrl);
@@ -115,9 +139,9 @@ const Index = () => {
             }
             
             // Store the audio duration - make sure to round it here
-            if (transcription.audio_duration) {
+            if (transcriptionData.audio_duration) {
               // Round to nearest integer to ensure no decimal places
-              const roundedDuration = Math.round(Number(transcription.audio_duration));
+              const roundedDuration = Math.round(Number(transcriptionData.audio_duration));
               setAudioDuration(roundedDuration);
               
               // Update monthly usage with the actual audio duration from the server
@@ -134,12 +158,12 @@ const Index = () => {
               toast.success("Transcription complete!");
               setTranscriptionCompleted(true);
             }
-          } else if (transcription.status === 'failed') {
+          } else if (transcriptionData.status === 'failed') {
             setIsProcessing(false);
-            toast.error(`Transcription failed: ${transcription.error || 'Unknown error'}`);
-          } else if (transcription.progress_message) {
+            toast.error(`Transcription failed: ${transcriptionData.error || 'Unknown error'}`);
+          } else if (transcriptionData.progress_message) {
             // Show progress messages if available
-            console.log(`Transcription progress: ${transcription.progress_message}`);
+            console.log(`Transcription progress: ${transcriptionData.progress_message}`);
           }
         }
       } catch (error) {
