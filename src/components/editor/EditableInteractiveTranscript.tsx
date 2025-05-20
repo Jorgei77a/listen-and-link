@@ -12,13 +12,13 @@ import { $getRoot, $createParagraphNode, $createTextNode, LexicalEditor } from "
 import { ListItemNode, ListNode } from "@lexical/list";
 import { HeadingNode } from "@lexical/rich-text";
 import { EditorToolbar } from "./EditorToolbar";
+import { InlineEditorToolbar } from "./InlineEditorToolbar";
 import { 
   findActiveSegment, 
   scrollElementIntoView, 
   isSameSegment,
   type TranscriptSegment 
 } from "@/utils/transcriptSyncUtils";
-import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 
 interface EditableInteractiveTranscriptProps {
   segments: TranscriptSegment[];
@@ -29,8 +29,7 @@ interface EditableInteractiveTranscriptProps {
   onEditorMount?: (editor: LexicalEditor) => void;
 }
 
-// Component to initialize editor content
-function InitializeSegment({
+function SegmentEditor({
   segment,
   isActive,
   onClick,
@@ -39,27 +38,13 @@ function InitializeSegment({
   isActive: boolean;
   onClick: () => void;
 }) {
-  const [editor] = useLexicalComposerContext();
-  const [isInitialized, setIsInitialized] = useState(false);
+  const editorRef = useRef<LexicalEditor | null>(null);
   
-  useEffect(() => {
-    if (isInitialized) return;
-    
-    // Initialize the editor content
-    editor.update(() => {
-      const root = $getRoot();
-      root.clear();
-      const paragraph = $createParagraphNode();
-      const textNode = $createTextNode(segment.text);
-      paragraph.append(textNode);
-      root.append(paragraph);
-    });
-
-    setIsInitialized(true);
-  }, [editor, segment.text, isInitialized]);
+  // Use a unique namespace for each segment editor to avoid conflicts
+  const namespace = `segment-editor-${segment.start.toString().replace('.', '-')}`;
   
   const initialConfig = {
-    namespace: `segment-${segment.start}`,
+    namespace,
     theme: {
       paragraph: "mb-0",
       text: {
@@ -69,7 +54,7 @@ function InitializeSegment({
       },
     },
     onError: (error: Error) => {
-      console.error("Segment Editor Error:", error);
+      console.error(`Segment Editor Error (${segment.start}):`, error);
     },
     editable: true,
     nodes: [ListNode, ListItemNode, HeadingNode],
@@ -99,8 +84,20 @@ function InitializeSegment({
         <HistoryPlugin />
         <ListPlugin />
         <OnChangePlugin
-          onChange={(editorState) => {
-            // You could implement auto-saving logic here
+          onChange={(editorState, editor) => {
+            if (!editorRef.current && editor) {
+              editorRef.current = editor;
+              
+              // Initialize content once the editor is available
+              editor.update(() => {
+                const root = $getRoot();
+                root.clear();
+                const paragraph = $createParagraphNode();
+                const textNode = $createTextNode(segment.text);
+                paragraph.append(textNode);
+                root.append(paragraph);
+              });
+            }
           }}
         />
       </LexicalComposer>
@@ -120,8 +117,6 @@ export function EditableInteractiveTranscript({
   const containerRef = useRef<HTMLDivElement>(null);
   const lastClickTimeRef = useRef<number>(0);
   const shouldScrollRef = useRef<boolean>(true);
-  const [showToolbar, setShowToolbar] = useState(false);
-  const [toolbarPosition, setToolbarPosition] = useState({ top: 0, left: 0 });
 
   // Find and set the active segment based on current time
   useEffect(() => {
@@ -171,31 +166,9 @@ export function EditableInteractiveTranscript({
     // Call the parent handler
     onSegmentClick(segment);
   }, [onSegmentClick]);
-
-  // Hide toolbar when clicking outside
-  useEffect(() => {
-    const handleClickOutside = () => {
-      setShowToolbar(false);
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
   
   return (
-    <div className={`relative ${className || ""}`}>
-      {showToolbar && (
-        <div 
-          className="absolute z-10 bg-background border rounded-md shadow-md"
-          style={{ top: `${toolbarPosition.top}px`, left: `${toolbarPosition.left}px` }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <EditorToolbar />
-        </div>
-      )}
-      
+    <div className={`relative ${className || ""}`}>      
       <ScrollArea 
         className={className || "h-[400px]"} 
         onWheel={handleUserScroll} 
@@ -206,8 +179,8 @@ export function EditableInteractiveTranscript({
             const isActive = activeSegment?.start === segment.start;
             
             return (
-              <InitializeSegment
-                key={segment.start}
+              <SegmentEditor
+                key={`segment-${segment.start}`}
                 segment={segment}
                 isActive={isActive}
                 onClick={() => handleSegmentClick(segment)}
