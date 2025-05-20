@@ -1,5 +1,5 @@
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { $getRoot } from "lexical";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ interface TranscriptSegmentHandlerProps {
 
 export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHandlerProps) {
   const [editor] = useLexicalComposerContext();
+  const clickHandlersSetupRef = useRef(false);
   
   // Set up click handler for paragraphs with timestamps
   const setupClickHandlers = useCallback(() => {
@@ -20,6 +21,9 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
         // Get all paragraph elements
         const root = $getRoot();
         const paragraphs = root.getChildren();
+        
+        // Track if we actually set up any handlers
+        let handlersAdded = false;
         
         // Attach click handlers to each paragraph
         paragraphs.forEach(paragraph => {
@@ -40,6 +44,7 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
                 // Don't trigger if the user is selecting text
                 if (window.getSelection()?.toString()) return;
                 
+                // Call the callback with the start time
                 onSegmentClick(start);
                 
                 // Show visual feedback
@@ -51,17 +56,34 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
               
               // Mark as having a click handler
               element.setAttribute('data-has-click-handler', 'true');
+              handlersAdded = true;
             }
           }
         });
+        
+        // Update our ref if we added handlers
+        if (handlersAdded) {
+          clickHandlersSetupRef.current = true;
+        }
       } catch (error) {
         console.error('Error setting up transcript click handlers:', error);
       }
     });
   }, [editor, onSegmentClick]);
   
-  // Set up click handlers when the component mounts
-  // We use a callback effect to ensure handlers are setup after editor is ready
+  // Effect to set up click handlers when the editor is ready
+  useEffect(() => {
+    // Only set up handlers if the editor and callback are available
+    if (editor && onSegmentClick && !clickHandlersSetupRef.current) {
+      // Wait for the editor to be ready
+      const timeout = setTimeout(() => {
+        setupClickHandlers();
+      }, 500);
+      
+      return () => clearTimeout(timeout);
+    }
+  }, [editor, onSegmentClick, setupClickHandlers]);
+  
   return {
     setupClickHandlers
   };

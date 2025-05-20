@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -10,6 +9,7 @@ import {
   formatTimestamp, 
   SYNC_CONFIG 
 } from "@/utils/audioSyncUtils";
+import { toast } from "sonner";
 
 interface AudioPlayerProps {
   src: string;
@@ -38,55 +38,165 @@ export function AudioPlayer({
   const [playbackState, setPlaybackState] = useState<PlaybackState>('idle');
   const [muted, setMuted] = useState(false);
   
-  // Refs
+  // Refs for tracking internal state
   const audioRef = useRef<HTMLAudioElement>(null);
   const timeUpdateLockRef = useRef(false);
   const seekingRef = useRef(false);
-  const resetTimeoutRef = useRef<number | null>(null);
+  const playAttemptTimeoutRef = useRef<number | null>(null);
+  const stateCheckIntervalRef = useRef<number | null>(null);
+  const lastTimeUpdateRef = useRef<number>(0);
+  const playRequestPendingRef = useRef(false);
+  const lastKnownTimeRef = useRef(0);
+  const userInteractingRef = useRef(false);
   
-  // Clean up function for all timeouts
+  // Clean up function for all timeouts and intervals
   const clearAllTimeouts = useCallback(() => {
-    if (resetTimeoutRef.current) {
-      window.clearTimeout(resetTimeoutRef.current);
-      resetTimeoutRef.current = null;
+    if (playAttemptTimeoutRef.current) {
+      window.clearTimeout(playAttemptTimeoutRef.current);
+      playAttemptTimeoutRef.current = null;
+    }
+    
+    if (stateCheckIntervalRef.current) {
+      window.clearInterval(stateCheckIntervalRef.current);
+      stateCheckIntervalRef.current = null;
     }
   }, []);
-
-  // Reset player state if it gets stuck
-  const resetPlayerIfStuck = useCallback(() => {
-    clearAllTimeouts();
+  
+  // Function to check for and recover from common playback issues
+  const checkAndRecoverPlayback = useCallback(() => {
+    if (!audioRef.current) return;
     
-    // If player is in seeking state for too long, reset it
-    if (playbackState === 'seeking' && seekingRef.current) {
-      console.log('Audio player was stuck in seeking state, resetting');
-      seekingRef.current = false;
-      timeUpdateLockRef.current = false;
-      setPlaybackState(isPlaying ? 'playing' : 'paused');
+    const now = Date.now();
+    const timeSinceLastUpdate = now - lastTimeUpdateRef.current;
+    const audio = audioRef.current;
+    
+    // Check if we think we're playing but haven't had timeupdate events
+    if (isPlaying && !seekingRef.current && timeSinceLastUpdate > 1000) {
+      // Check if audio is actually playing or if it's stalled
+      if (!audio.paused && audio.currentTime > 0 && audio.readyState >= 3) {
+        // Audio should be playing, but no time updates - might be stalled
+        console.log('Potential stall detected - time updates stopped while playing');
+        
+        // Don't reset to 0 - preserve last known position
+        audio.currentTime = Math.max(currentTime, lastKnownTimeRef.current);
+        
+        // Force a time update to at least show the correct position
+        setCurrentTime(audio.currentTime);
+        lastKnownTimeRef.current = audio.currentTime;
+        lastTimeUpdateRef.current = now;
+      } else if (audio.paused && playbackState === 'playing') {
+        // We think we're playing but the audio is paused - try to recover
+        console.log('State mismatch: UI shows playing but audio is paused');
+        
+        // If user isn't interacting, try to recover by toggling state
+        if (!userInteractingRef.current && !seekingRef.current && !playRequestPendingRef.current) {
+          setPlaybackState('paused');
+          setIsPlaying(false);
+        }
+      }
+    } else if (!isPlaying && !audio.paused && playbackState !== 'seeking') {
+      // We think we're paused but the audio is playing
+      console.log('State mismatch: UI shows paused but audio is playing');
+      
+      // If user isn't interacting, recover by updating the UI state
+      if (!userInteractingRef.current && !seekingRef.current) {
+        setPlaybackState('playing');
+        setIsPlaying(true);
+      }
     }
-  }, [playbackState, isPlaying]);
+    
+    // Handle the case where time got reset to 0 incorrectly
+    if (audio.currentTime === 0 && lastKnownTimeRef.current > 0 && !userInteractingRef.current) {
+      // Only restore if this wasn't due to reaching the end or user interaction
+      if (!audio.ended && playbackState !== 'seeking' && !seekingRef.current) {
+        console.log('Restoring position from last known time');
+        audio.currentTime = lastKnownTimeRef.current;
+        setCurrentTime(lastKnownTimeRef.current);
+      }
+    }
+  }, [isPlaying, playbackState, currentTime]);
   
   // Handle play/pause
   const togglePlayPause = useCallback(() => {
     if (!audioRef.current) return;
     
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else if (isAudioPlayable(audioRef)) {
-      // Only attempt to play if the audio is in a playable state
-      const playPromise = audioRef.current.play();
-      
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            // Playback started successfully
+    userInteractingRef.current = true;
+    
+    try {
+      if (isPlaying) {
+        // Pausing is usually reliable
+        audioRef.current.pause();
+        setPlaybackState('paused');
+        setIsPlaying(false);
+      } else {
+        // Don't reset current time when playing - keep the current position
+        lastKnownTimeRef.current = audioRef.current.currentTime;
+        
+        // Set a flag that we're trying to play
+        playRequestPendingRef.current = true;
+        
+        // Only attempt to play if the audio is in a playable state
+        if (isAudioPlayable(audioRef)) {
+          setPlaybackState('loading');
+          
+          const playPromise = audioRef.current.play();
+          
+          if (playPromise !== undefined) {
+            playPromise
+              .then(() => {
+                playRequestPendingRef.current = false;
+                // Playback started successfully
+                setIsPlaying(true);
+                setPlaybackState('playing');
+                
+                // Update the last known time to the current position
+                lastTimeUpdateRef.current = Date.now();
+                lastKnownTimeRef.current = audioRef.current!.currentTime;
+              })
+              .catch(error => {
+                playRequestPendingRef.current = false;
+                console.error("Play failed:", error);
+                setPlaybackState('error');
+                setIsPlaying(false);
+                toast.error("Playback failed. Please try again.");
+              });
+          } else {
+            // For browsers where promise is not returned
+            setIsPlaying(true);
             setPlaybackState('playing');
-          })
-          .catch(error => {
-            console.error("Play failed:", error);
-            setPlaybackState('error');
-            setIsPlaying(false);
-          });
+            playRequestPendingRef.current = false;
+          }
+        } else {
+          console.log("Audio not playable yet, showing loading state");
+          setPlaybackState('loading');
+          
+          // Clear any existing timeout and set a new one
+          if (playAttemptTimeoutRef.current) {
+            window.clearTimeout(playAttemptTimeoutRef.current);
+          }
+          
+          // Try again after a delay
+          playAttemptTimeoutRef.current = window.setTimeout(() => {
+            playRequestPendingRef.current = false;
+            
+            if (audioRef.current && audioRef.current.readyState >= 2) {
+              console.log("Retrying play after delay");
+              togglePlayPause();
+            } else {
+              console.error("Audio still not ready after delay");
+              setPlaybackState('error');
+              toast.error("Audio failed to load. Please try again.");
+            }
+            
+            playAttemptTimeoutRef.current = null;
+          }, 1000);
+        }
       }
+    } finally {
+      // Reset user interaction flag after a short delay
+      setTimeout(() => {
+        userInteractingRef.current = false;
+      }, 300);
     }
   }, [isPlaying]);
 
@@ -94,26 +204,46 @@ export function AudioPlayer({
   const skipForward = useCallback(() => {
     if (!audioRef.current) return;
     
+    userInteractingRef.current = true;
+    
     const newTime = Math.min(audioRef.current.duration, audioRef.current.currentTime + 5);
     jumpToTime(newTime);
+    
+    setTimeout(() => {
+      userInteractingRef.current = false;
+    }, 300);
   }, []);
 
   const skipBackward = useCallback(() => {
     if (!audioRef.current) return;
     
+    userInteractingRef.current = true;
+    
     const newTime = Math.max(0, audioRef.current.currentTime - 5);
     jumpToTime(newTime);
+    
+    setTimeout(() => {
+      userInteractingRef.current = false;
+    }, 300);
   }, []);
 
   // Update time handler with lock to prevent feedback loops
   const handleTimeUpdate = useCallback(() => {
     if (!audioRef.current || timeUpdateLockRef.current) return;
     
-    const currentTime = audioRef.current.currentTime;
-    setCurrentTime(currentTime);
+    const audio = audioRef.current;
+    const currentTimeValue = audio.currentTime;
     
-    if (onTimeUpdate && !seekingRef.current) {
-      onTimeUpdate(currentTime);
+    // Update last known good time
+    lastTimeUpdateRef.current = Date.now();
+    lastKnownTimeRef.current = currentTimeValue;
+    
+    // Update the UI display
+    setCurrentTime(currentTimeValue);
+    
+    // Notify external components if needed
+    if (onTimeUpdate && !seekingRef.current && !userInteractingRef.current) {
+      onTimeUpdate(currentTimeValue);
     }
   }, [onTimeUpdate]);
 
@@ -121,45 +251,97 @@ export function AudioPlayer({
   const handleLoadedMetadata = useCallback(() => {
     if (!audioRef.current) return;
     
-    setDuration(audioRef.current.duration);
+    const audioDuration = audioRef.current.duration;
+    setDuration(isNaN(audioDuration) ? 0 : audioDuration);
     setPlaybackState('paused');
     
     // Apply initial volume
     audioRef.current.volume = volume;
-  }, [volume]);
+    audioRef.current.muted = muted;
+    
+    console.log(`Audio metadata loaded. Duration: ${audioDuration}s`);
+  }, [volume, muted]);
+
+  // Handler for when audio can be played
+  const handleCanPlay = useCallback(() => {
+    console.log('Audio can play now');
+    
+    if (playRequestPendingRef.current) {
+      // If we were waiting to play, try again now
+      if (audioRef.current && isPlaying) {
+        const playPromise = audioRef.current.play();
+        
+        if (playPromise !== undefined) {
+          playPromise.catch(error => {
+            console.error("Play attempt on canplay failed:", error);
+            playRequestPendingRef.current = false;
+            setPlaybackState('error');
+            setIsPlaying(false);
+          });
+        }
+      }
+    }
+  }, [isPlaying]);
 
   // Handle user scrubbing the timeline
   const handleSeek = useCallback((value: number[]) => {
     const time = value[0];
+    
+    userInteractingRef.current = true;
     
     // Lock time updates to prevent feedback
     timeUpdateLockRef.current = true;
     seekingRef.current = true;
     setPlaybackState('seeking');
     
+    // Update UI immediately to give feedback
     setCurrentTime(time);
     
-    // Jump to the new time
+    // Store this as our last known position
+    lastKnownTimeRef.current = time;
+    
+    // Jump to the new time in the audio element
     if (audioRef.current) {
       audioRef.current.currentTime = time;
     }
     
-    // Set a timeout to clear the seeking flag
+    // Set a timeout to clear the seeking flags
     window.setTimeout(() => {
       seekingRef.current = false;
       timeUpdateLockRef.current = false;
+      userInteractingRef.current = false;
+      
+      // Update the playback state based on whether we were playing before
       setPlaybackState(isPlaying ? 'playing' : 'paused');
+      
+      // If we were playing, make sure we're still playing
+      if (isPlaying && audioRef.current && audioRef.current.paused) {
+        // Try to resume playback
+        const playPromise = audioRef.current.play();
+        
+        if (playPromise !== undefined) {
+          playPromise.catch(error => {
+            console.error("Resume after seek failed:", error);
+            setIsPlaying(false);
+            setPlaybackState('paused');
+          });
+        }
+      }
+      
+      // Also trigger the onTimeUpdate callback
+      if (onTimeUpdate) {
+        onTimeUpdate(time);
+      }
     }, 200);
-    
-    // Also trigger the onTimeUpdate callback
-    if (onTimeUpdate) {
-      onTimeUpdate(time);
-    }
   }, [isPlaying, onTimeUpdate]);
 
-  // Handle seeking events
+  // Handle seeking events from the audio element
   const handleSeeking = useCallback(() => {
-    seekingRef.current = true;
+    if (!seekingRef.current && !userInteractingRef.current) {
+      // This is a seeking event we didn't initiate (e.g. browser buffering)
+      seekingRef.current = true;
+      timeUpdateLockRef.current = true;
+    }
     setPlaybackState('seeking');
   }, []);
 
@@ -168,7 +350,23 @@ export function AudioPlayer({
     setTimeout(() => {
       seekingRef.current = false;
       timeUpdateLockRef.current = false;
+      
+      if (audioRef.current) {
+        // Make sure our UI shows the correct time
+        setCurrentTime(audioRef.current.currentTime);
+        lastKnownTimeRef.current = audioRef.current.currentTime;
+      }
+      
       setPlaybackState(isPlaying ? 'playing' : 'paused');
+      
+      // If we were playing, make sure we're still playing
+      if (isPlaying && audioRef.current && audioRef.current.paused) {
+        audioRef.current.play().catch(error => {
+          console.error("Resume after seeked failed:", error);
+          setIsPlaying(false);
+          setPlaybackState('paused');
+        });
+      }
     }, 100);
   }, [isPlaying]);
 
@@ -176,33 +374,43 @@ export function AudioPlayer({
   const jumpToTime = useCallback((time: number) => {
     if (!audioRef.current) return;
     
+    userInteractingRef.current = true;
+    
     // Lock time updates during the jump
     timeUpdateLockRef.current = true;
     seekingRef.current = true;
     setPlaybackState('seeking');
     
-    // Set the new time
-    audioRef.current.currentTime = Math.max(0, Math.min(time, audioRef.current.duration || 0));
-    setCurrentTime(audioRef.current.currentTime);
+    // Update UI immediately for feedback
+    setCurrentTime(time);
+    lastKnownTimeRef.current = time;
+    
+    // Set the new time in the audio element
+    const boundedTime = Math.max(0, Math.min(time, audioRef.current.duration || 0));
+    audioRef.current.currentTime = boundedTime;
     
     // If we were playing, continue playing
-    if (isPlaying) {
-      const playPromise = audioRef.current.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(error => {
-          console.error("Play after seek failed:", error);
-          setIsPlaying(false);
-          setPlaybackState('error');
-        });
-      }
-    }
+    const wasPlaying = isPlaying;
     
-    // Schedule a reset of the lock flags
-    resetTimeoutRef.current = window.setTimeout(() => {
+    setTimeout(() => {
       seekingRef.current = false;
       timeUpdateLockRef.current = false;
-      setPlaybackState(isPlaying ? 'playing' : 'paused');
-      resetTimeoutRef.current = null;
+      userInteractingRef.current = false;
+      
+      // Update playback state based on previous state
+      setPlaybackState(wasPlaying ? 'playing' : 'paused');
+      
+      if (wasPlaying && audioRef.current && audioRef.current.paused) {
+        const playPromise = audioRef.current.play();
+        
+        if (playPromise !== undefined) {
+          playPromise.catch(error => {
+            console.error("Play after jump failed:", error);
+            setIsPlaying(false);
+            setPlaybackState('paused');
+          });
+        }
+      }
     }, 300);
   }, [isPlaying]);
 
@@ -249,6 +457,21 @@ export function AudioPlayer({
     }
   }, [onJumpToTime]);
 
+  // Effect to set up continuous state checking for reliability
+  useEffect(() => {
+    // Start a periodic check for state consistency
+    stateCheckIntervalRef.current = window.setInterval(() => {
+      checkAndRecoverPlayback();
+    }, 1000);
+    
+    return () => {
+      if (stateCheckIntervalRef.current) {
+        window.clearInterval(stateCheckIntervalRef.current);
+        stateCheckIntervalRef.current = null;
+      }
+    };
+  }, [checkAndRecoverPlayback]);
+
   // Effect to handle audio element events
   useEffect(() => {
     const audioEl = audioRef.current;
@@ -256,28 +479,79 @@ export function AudioPlayer({
     
     // Handle play/pause events
     const handlePlay = () => {
-      setIsPlaying(true);
-      setPlaybackState('playing');
+      // Only update if needed to avoid unnecessary rerenders
+      if (!isPlaying) {
+        setIsPlaying(true);
+        setPlaybackState('playing');
+      }
+      
+      // Reset the play request pending flag
+      playRequestPendingRef.current = false;
+      
+      // Update the last time update timestamp
+      lastTimeUpdateRef.current = Date.now();
     };
     
     const handlePause = () => {
-      setIsPlaying(false);
-      setPlaybackState('paused');
+      // Only update if needed
+      if (isPlaying && !seekingRef.current) {
+        setIsPlaying(false);
+        setPlaybackState('paused');
+      }
     };
     
     const handleEnded = () => {
       setIsPlaying(false);
       setPlaybackState('paused');
+      
+      // When audio ends, the currentTime is at the end
+      // We want to preserve this, not reset to 0
+      lastKnownTimeRef.current = audioEl.duration || 0;
     };
     
     const handleWaiting = () => {
-      setPlaybackState('loading');
+      // Only show loading if we're currently playing
+      if (isPlaying) {
+        setPlaybackState('loading');
+      }
+    };
+    
+    const handleStalled = () => {
+      console.log("Audio stalled");
+      
+      // Check if we think we're playing but audio is actually stalled
+      if (isPlaying) {
+        // Don't stop playback yet, but update state
+        setPlaybackState('loading');
+        
+        // Try to recover after a timeout if still stalled
+        setTimeout(() => {
+          if (audioEl && audioEl.paused && isPlaying) {
+            console.log("Attempting to recover from stall");
+            
+            // Try to resume from last known position
+            audioEl.currentTime = lastKnownTimeRef.current;
+            
+            const playPromise = audioEl.play();
+            if (playPromise !== undefined) {
+              playPromise.catch(error => {
+                console.error("Recovery from stall failed:", error);
+                setIsPlaying(false);
+                setPlaybackState('paused');
+              });
+            }
+          }
+        }, 2000);
+      }
     };
     
     const handleError = () => {
       console.error("Audio player error:", audioEl.error);
       setPlaybackState('error');
       setIsPlaying(false);
+      
+      // Show a user-friendly error message
+      toast.error("Audio playback error: Please try again or reload the page.");
     };
     
     // Add event listeners
@@ -286,6 +560,8 @@ export function AudioPlayer({
     audioEl.addEventListener('pause', handlePause);
     audioEl.addEventListener('ended', handleEnded);
     audioEl.addEventListener('waiting', handleWaiting);
+    audioEl.addEventListener('stalled', handleStalled);
+    audioEl.addEventListener('canplay', handleCanPlay);
     audioEl.addEventListener('error', handleError);
     
     // Cleanup
@@ -295,19 +571,12 @@ export function AudioPlayer({
       audioEl.removeEventListener('pause', handlePause);
       audioEl.removeEventListener('ended', handleEnded);
       audioEl.removeEventListener('waiting', handleWaiting);
+      audioEl.removeEventListener('stalled', handleStalled);
+      audioEl.removeEventListener('canplay', handleCanPlay);
       audioEl.removeEventListener('error', handleError);
       clearAllTimeouts();
     };
-  }, [clearAllTimeouts]);
-
-  // Effect to periodically check if player is stuck
-  useEffect(() => {
-    if (playbackState === 'seeking') {
-      // Set a timeout to check if seeking gets stuck
-      const checkTimeout = window.setTimeout(resetPlayerIfStuck, 2000);
-      return () => window.clearTimeout(checkTimeout);
-    }
-  }, [playbackState, resetPlayerIfStuck]);
+  }, [isPlaying, clearAllTimeouts, handleCanPlay]);
 
   // Get the appropriate volume icon based on current volume
   const VolumeIcon = muted || volume === 0 
