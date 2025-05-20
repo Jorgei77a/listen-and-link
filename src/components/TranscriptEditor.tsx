@@ -15,7 +15,7 @@ import {
   Heading2,
   Heading3,
   ListOrdered,
-  ListUnordered,
+  List,
   Undo,
   Redo,
 } from 'lucide-react'
@@ -117,7 +117,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           </MenuButton>
           
           <MenuButton 
-            onClick={() => editor.chain().focus().toggleUnderline().run()}
+            onClick={() => editor.chain().focus().toggleMark('underline').run()}
             active={editor.isActive('underline')}
           >
             <UnderlineIcon className="h-4 w-4" />
@@ -152,7 +152,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
             onClick={() => editor.chain().focus().toggleBulletList().run()}
             active={editor.isActive('bulletList')}
           >
-            <ListUnordered className="h-4 w-4" />
+            <List className="h-4 w-4" />
           </MenuButton>
           
           <div className="w-px h-full mx-1 bg-border" />

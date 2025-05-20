@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -8,8 +7,7 @@ import {
   Download, 
   Lock, 
   Clock, 
-  FileText,
-  FileText2
+  FileText
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -179,7 +177,7 @@ const TranscriptionDisplay = ({
                       onClick={() => handleDownload('markdown')} 
                       className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
                     >
-                      <FileText2 className="w-3 h-3 mr-1" />
+                      <FileText className="w-3 h-3 mr-1" />
                       Markdown (.md)
                     </button>
                   ) : (
