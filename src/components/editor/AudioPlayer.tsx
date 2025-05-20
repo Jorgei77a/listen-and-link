@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -453,19 +452,11 @@ export function AudioPlayer({
 
   // Effect to respond to external time jump requests
   useEffect(() => {
-    // Important: This is where we set up the handler for external jump requests
+    // Only set up the handler if onJumpToTime callback was provided
     if (!onJumpToTime) return;
     
-    // Create a handler function that will be exposed through the onJumpToTime prop
-    const handleExternalJumpToTime = (time: number) => {
-      console.log(`External jump request to: ${time}s`);
-      if (audioRef.current && time !== undefined && time >= 0) {
-        jumpToTime(time);
-      }
-    };
-    
-    // Expose our jump handler via the callback
-    onJumpToTime(handleExternalJumpToTime);
+    // Call the provided callback with our jump handler
+    onJumpToTime(jumpToTime);
     
     return () => {}; 
   }, [onJumpToTime, jumpToTime]);
