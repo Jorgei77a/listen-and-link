@@ -11,7 +11,9 @@ import {
   $createParagraphNode, 
   $createTextNode, 
   EditorState, 
-  LexicalEditor as LexicalEditorType 
+  LexicalEditor as LexicalEditorType,
+  ParagraphNode,
+  LexicalNode 
 } from "lexical";
 import { cn } from "@/lib/utils";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
@@ -28,6 +30,23 @@ interface LexicalEditorProps {
   onEditorMount?: (editor: LexicalEditorType) => void;
   onEditorChange?: (editorState: EditorState) => void;
   currentTimeInSeconds?: number | null;
+}
+
+// Create a custom interface to handle our timestamps
+interface TimestampData {
+  start: string;
+  end: string;
+}
+
+// Add a type declaration for our extended ParagraphNode
+declare module 'lexical' {
+  interface ParagraphNode {
+    timestampData?: TimestampData;
+  }
+  
+  interface LexicalNode {
+    timestampData?: TimestampData;
+  }
 }
 
 function createTextSegments(text: string, segments?: LexicalEditorProps['segments']): Array<{ text: string; start?: number; end?: number }> {
@@ -140,8 +159,8 @@ export function LexicalEditor({
         
         // Add timestamp data if available
         if (segment.start !== undefined && segment.end !== undefined) {
-          // Need to set data attributes after the node is appended to the DOM
-          paragraphNode.__timestamp = {
+          // Store timestamp data on the node using a custom property
+          (paragraphNode as ParagraphNode).timestampData = {
             start: segment.start.toString(),
             end: segment.end.toString()
           };
@@ -181,12 +200,12 @@ export function LexicalEditor({
               const root = $getRoot();
               const paragraphs = root.getChildren();
               
-              paragraphs.forEach(paragraph => {
-                if (paragraph.__timestamp) {
+              paragraphs.forEach((paragraph: LexicalNode) => {
+                if ((paragraph as any).timestampData) {
                   const element = editor.getElementByKey(paragraph.getKey());
                   if (element) {
-                    element.setAttribute('data-start', paragraph.__timestamp.start);
-                    element.setAttribute('data-end', paragraph.__timestamp.end);
+                    element.setAttribute('data-start', (paragraph as any).timestampData.start);
+                    element.setAttribute('data-end', (paragraph as any).timestampData.end);
                   }
                 }
               });

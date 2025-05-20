@@ -35,9 +35,10 @@ const Index = () => {
     
     const checkTranscription = async () => {
       try {
+        // Add {count: "exact"} to get data even if there's a column missing
         const { data, error } = await supabase
           .from('transcriptions')
-          .select('*, audio_duration, segments, file_path')
+          .select('*', { count: "exact" })
           .eq('id', currentTranscriptionId)
           .single();
         
@@ -51,21 +52,23 @@ const Index = () => {
             setTranscript(data.transcript);
             setIsProcessing(false);
             
-            // Store segments if available
-            if (data.segments) {
-              try {
-                let parsedSegments: TranscriptionSegment[] = [];
-                
+            // Parse segments if available
+            let parsedSegments: TranscriptionSegment[] = [];
+            
+            // Handle segments data if it exists in the database
+            try {
+              if (data.segments) {
                 if (typeof data.segments === 'string') {
                   parsedSegments = JSON.parse(data.segments);
                 } else if (Array.isArray(data.segments)) {
                   parsedSegments = data.segments;
                 }
-                
-                setSegments(parsedSegments);
-              } catch (error) {
-                console.error('Failed to parse segments:', error);
               }
+              setSegments(parsedSegments);
+            } catch (error) {
+              console.error('Failed to parse segments:', error);
+              // Set empty segments array if parsing fails
+              setSegments([]);
             }
             
             // Create signed URL for the audio file
