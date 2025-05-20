@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 interface TranscriptEditorProps {
-  content: string
+  content: string | object
   onChange?: (html: string) => void
   onTextClick?: (event: MouseEvent, position: number) => void
 }
@@ -159,17 +159,16 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
     tooltip?: string,
     children: React.ReactNode 
   }) => {
-    // Fix for double-click issue: directly focus the editor before executing command
+    // Ensure focus is explicitly set before applying any formatting commands
     const handleButtonClick = () => {
       if (editor && !editor.isDestroyed) {
-        // First ensure editor has focus before running any command
-        editor.commands.focus();
+        // First force focus the editor
+        editor.commands.focus()
         
-        // Small timeout to ensure focus is fully applied
+        // Then execute the command with a small delay to ensure focus is applied
         setTimeout(() => {
-          // Then execute the command
-          onClick();
-        }, 10);
+          onClick()
+        }, 10)
       }
     }
     
@@ -254,7 +253,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           <MenuButton 
             onClick={() => editor.chain().toggleHeading({ level: 1 }).run()}
             active={editor.isActive('heading', { level: 1 })}
-            tooltip="Heading 1 (applies to whole paragraph)"
+            tooltip="Heading 1 (applies to current paragraph)"
           >
             <Heading1 className="h-4 w-4" />
           </MenuButton>
@@ -262,7 +261,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           <MenuButton 
             onClick={() => editor.chain().toggleHeading({ level: 2 }).run()}
             active={editor.isActive('heading', { level: 2 })}
-            tooltip="Heading 2 (applies to whole paragraph)"
+            tooltip="Heading 2 (applies to current paragraph)"
           >
             <Heading2 className="h-4 w-4" />
           </MenuButton>
@@ -270,7 +269,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           <MenuButton 
             onClick={() => editor.chain().toggleHeading({ level: 3 }).run()}
             active={editor.isActive('heading', { level: 3 })}
-            tooltip="Heading 3 (applies to whole paragraph)"
+            tooltip="Heading 3 (applies to current paragraph)"
           >
             <Heading3 className="h-4 w-4" />
           </MenuButton>
@@ -280,7 +279,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           <MenuButton 
             onClick={() => editor.chain().toggleBulletList().run()}
             active={editor.isActive('bulletList')}
-            tooltip="Bullet List (applies to whole paragraph)"
+            tooltip="Bullet List (applies to current paragraph)"
           >
             <List className="h-4 w-4" />
           </MenuButton>

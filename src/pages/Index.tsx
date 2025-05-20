@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -78,7 +79,7 @@ const Index = () => {
     return () => clearInterval(intervalId);
   }, [currentTranscriptionId, transcriptionCompleted, updateMonthlyUsage]);
 
-  // Helper function to format transcript text with proper paragraphs
+  // Helper function to format transcript text into proper paragraphs
   const formatTranscriptText = (text: string): string => {
     if (!text) return "";
     

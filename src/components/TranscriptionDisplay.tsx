@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -15,6 +16,7 @@ import { useSubscription } from "@/context/SubscriptionContext";
 import { FeatureGate } from "@/components/FeatureGate";
 import TranscriptEditor from "./TranscriptEditor";
 import TranscriptAudioPlayer from "./TranscriptAudioPlayer";
+import { convertPlainTextToTiptapJSON } from "@/utils/editorUtils";
 import { 
   formatAudioDuration, 
   extractTimestamps, 
@@ -91,25 +93,23 @@ const TranscriptionDisplay = ({
   onReset 
 }: TranscriptionDisplayProps) => {
   const [copied, setCopied] = useState(false);
+  // Store HTML content from Tiptap
   const [editedContent, setEditedContent] = useState<string>("");
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [activeTab, setActiveTab] = useState<string>("editor");
   const displayTitle = customTitle || fileName.split('.')[0];
   
-  // Process the raw transcript with basic paragraph formatting only
+  // Process the raw transcript and create initial Tiptap JSON content
   const formattedText = formatTextWithParagraphs(transcript);
+  // Convert to Tiptap JSON for proper paragraph blocks
+  const editorInitialContent = convertPlainTextToTiptapJSON(transcript);
 
-  // Initialize edited content from formatted transcript only on first load
+  // Initialize segments and edited content
   useEffect(() => {
-    // Initialize the editor with formatted text only if editedContent is empty
-    if (!editedContent) {
-      setEditedContent(formattedText);
-    }
-    
     // Extract any timestamps from the transcript for audio sync
     const extractedSegments = extractTimestamps(transcript);
     setSegments(extractedSegments);
-  }, [transcript, formattedText]);
+  }, [transcript]);
 
   // Get subscription information
   const { getTierLimits, currentTier } = useSubscription();
@@ -278,7 +278,7 @@ const TranscriptionDisplay = ({
           
           <TabsContent value="editor">
             <TranscriptEditor 
-              content={editedContent || formattedText}
+              content={editorInitialContent}
               onChange={handleEditorChange}
               onTextClick={handleTextClick}
             />
