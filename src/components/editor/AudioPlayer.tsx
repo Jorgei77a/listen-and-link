@@ -79,10 +79,38 @@ export function AudioPlayer({
 
   // Effect to handle external time jumps
   useEffect(() => {
-    if (onJumpToTime) {
-      return () => {}; // This effect just sets up the callback
+    if (onJumpToTime && audioRef.current) {
+      const jumpToTimeHandler = (time: number) => {
+        if (audioRef.current) {
+          audioRef.current.currentTime = time;
+          if (!isPlaying) {
+            audioRef.current.play().catch(err => console.error('Failed to play audio:', err));
+            setIsPlaying(true);
+          }
+        }
+      };
+      
+      // Create a custom event listener for time jumps
+      const eventName = 'audio-jump-to-time';
+      const handleJumpEvent = (e: CustomEvent) => jumpToTimeHandler(e.detail);
+      
+      // Cast to any to allow adding the listener
+      window.addEventListener(eventName as any, handleJumpEvent as any);
+      
+      // Expose a method to jump to time
+      const jumpToTimeFn = (time: number) => {
+        const event = new CustomEvent(eventName, { detail: time });
+        window.dispatchEvent(event);
+      };
+      
+      // Make the function available to the parent component
+      onJumpToTime(jumpToTimeFn);
+      
+      return () => {
+        window.removeEventListener(eventName as any, handleJumpEvent as any);
+      };
     }
-  }, [onJumpToTime]);
+  }, [onJumpToTime, isPlaying]);
 
   return (
     <div className={cn("flex flex-col space-y-2", className)}>

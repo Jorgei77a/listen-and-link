@@ -1,12 +1,12 @@
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { ListItemNode, ListNode } from "@lexical/list";
-import { HeadingNode } from "@lexical/rich-text"; // Add import for HeadingNode
+import { HeadingNode } from "@lexical/rich-text"; 
 import LexicalErrorBoundary from "@lexical/react/LexicalErrorBoundary";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { EditorToolbar } from "./EditorToolbar";
@@ -35,6 +35,8 @@ interface LexicalEditorProps {
   onEditorMount?: (editor: LexicalEditorType) => void;
   onEditorChange?: (editorState: EditorState) => void;
   currentTimeInSeconds?: number | null;
+  onSegmentClick?: (segmentStart: number) => void;
+  bufferTimeSeconds?: number;
 }
 
 // Create a custom interface to handle our timestamps
@@ -134,6 +136,7 @@ function InitializeContent({
                 if (element) {
                   element.setAttribute('data-start', timestampData.start);
                   element.setAttribute('data-end', timestampData.end);
+                  element.classList.add('cursor-pointer', 'hover:bg-primary/5', 'transition-colors');
                 }
               }
             });
@@ -156,15 +159,56 @@ function InitializeContent({
 }
 
 // Component to handle timestamp highlighting based on current audio time
-function TimestampHighlighter({ currentTimeInSeconds }: { currentTimeInSeconds?: number | null }) {
+function TimestampHighlighter({ 
+  currentTimeInSeconds,
+  onSegmentClick,
+  bufferTimeSeconds = 5
+}: { 
+  currentTimeInSeconds?: number | null; 
+  onSegmentClick?: (segmentStart: number) => void;
+  bufferTimeSeconds?: number;
+}) {
   const [editor] = useLexicalComposerContext();
+  const lastHighlightedRef = useRef<HTMLElement | null>(null);
   
+  // Setup click handlers for paragraphs
+  useEffect(() => {
+    if (!editor || !onSegmentClick) return;
+    
+    const handleClick = (event: MouseEvent) => {
+      let target = event.target as HTMLElement;
+      
+      // Find the paragraph element that was clicked
+      while (target && !target.hasAttribute('data-start') && target !== document.body) {
+        target = target.parentElement as HTMLElement;
+      }
+      
+      if (target && target.hasAttribute('data-start')) {
+        const start = parseFloat(target.getAttribute('data-start') || '0');
+        onSegmentClick(start);
+        event.stopPropagation(); // Prevent multiple handlers
+      }
+    };
+    
+    // Add click handler to the editor
+    const editorElement = editor.getRootElement();
+    if (editorElement) {
+      editorElement.addEventListener('click', handleClick);
+      
+      return () => {
+        editorElement.removeEventListener('click', handleClick);
+      };
+    }
+  }, [editor, onSegmentClick]);
+  
+  // Handle highlighting based on current time
   useEffect(() => {
     if (!currentTimeInSeconds || !editor) return;
     
     editor.update(() => {
       const root = $getRoot();
       const paragraphs = root.getChildren();
+      let activeElement: HTMLElement | null = null;
       
       paragraphs.forEach((paragraph) => {
         const element = editor.getElementByKey(paragraph.getKey());
@@ -174,22 +218,42 @@ function TimestampHighlighter({ currentTimeInSeconds }: { currentTimeInSeconds?:
         const start = parseFloat(element.getAttribute('data-start') || '0');
         const end = parseFloat(element.getAttribute('data-end') || '0');
         
-        if (start <= currentTimeInSeconds && currentTimeInSeconds <= end) {
-          element.classList.add('bg-primary/10', 'transition-colors');
+        // Add buffer time to the end timestamp
+        const bufferedEnd = end + bufferTimeSeconds;
+        
+        if (start <= currentTimeInSeconds && currentTimeInSeconds <= bufferedEnd) {
+          element.classList.add('bg-primary/10');
+          activeElement = element;
           
-          // Scroll into view if needed
-          const rect = element.getBoundingClientRect();
-          const parentRect = element.parentElement?.getBoundingClientRect();
-          
-          if (parentRect && (rect.bottom > parentRect.bottom || rect.top < parentRect.top)) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Remove highlight from previous element if it's different
+          if (lastHighlightedRef.current && lastHighlightedRef.current !== element) {
+            lastHighlightedRef.current.classList.remove('bg-primary/10');
           }
-        } else {
-          element.classList.remove('bg-primary/10');
+          
+          // Store current highlighted element
+          lastHighlightedRef.current = element;
+        } else if (element.classList.contains('bg-primary/10')) {
+          // Only remove if it's not the active element
+          if (!activeElement || activeElement !== element) {
+            element.classList.remove('bg-primary/10');
+          }
         }
       });
+      
+      // Scroll into view if needed
+      if (activeElement) {
+        const editorElement = editor.getRootElement();
+        if (editorElement) {
+          const rect = activeElement.getBoundingClientRect();
+          const parentRect = editorElement.getBoundingClientRect();
+          
+          if (rect.bottom > parentRect.bottom || rect.top < parentRect.top) {
+            activeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
+      }
     });
-  }, [currentTimeInSeconds, editor]);
+  }, [currentTimeInSeconds, editor, bufferTimeSeconds]);
   
   return null;
 }
@@ -202,12 +266,16 @@ export function LexicalEditor({
   onEditorMount,
   onEditorChange,
   currentTimeInSeconds,
+  onSegmentClick,
+  bufferTimeSeconds = 5,
 }: LexicalEditorProps) {
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const [isContentReady, setIsContentReady] = useState(false);
+  const editorMountedRef = useRef(false);
+  const uniqueNamespace = useRef(`TranscriptEditor-${Math.random().toString(36).substring(2, 11)}`).current;
   
   const initialConfig = {
-    namespace: "TranscriptEditor",
+    namespace: uniqueNamespace,
     theme: {
       paragraph: "mb-2 last:mb-0",
       heading: {
@@ -230,8 +298,16 @@ export function LexicalEditor({
       console.error("Lexical Editor Error:", error);
     },
     editable: !readOnly,
-    nodes: [ListNode, ListItemNode, HeadingNode], // Add HeadingNode to the nodes array
+    nodes: [ListNode, ListItemNode, HeadingNode],
   };
+
+  // Track editor mount state
+  const handleEditorInitialized = useCallback((editor: LexicalEditorType) => {
+    if (onEditorMount && !editorMountedRef.current) {
+      onEditorMount(editor);
+      editorMountedRef.current = true;
+    }
+  }, [onEditorMount]);
 
   return (
     <div className={cn("border rounded-md", className)} ref={editorContainerRef}>
@@ -264,15 +340,15 @@ export function LexicalEditor({
         />
         
         {/* Handle timestamp highlighting */}
-        {currentTimeInSeconds !== undefined && (
-          <TimestampHighlighter currentTimeInSeconds={currentTimeInSeconds} />
-        )}
+        <TimestampHighlighter 
+          currentTimeInSeconds={currentTimeInSeconds} 
+          onSegmentClick={onSegmentClick} 
+          bufferTimeSeconds={bufferTimeSeconds}
+        />
         
         <OnChangePlugin
           onChange={(editorState, editor) => {
-            if (onEditorMount && editor) {
-              onEditorMount(editor);
-            }
+            handleEditorInitialized(editor);
             
             if (onEditorChange) {
               onEditorChange(editorState);

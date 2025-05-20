@@ -61,6 +61,8 @@ const TranscriptionDisplay = ({
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [editorReady, setEditorReady] = useState(false);
+  const jumpToTimeRef = useRef<((time: number) => void) | null>(null);
+  const bufferTimeSeconds = 5; // Configurable buffer time in seconds
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
@@ -85,9 +87,15 @@ const TranscriptionDisplay = ({
     setCurrentTime(time);
   };
 
-  const jumpToTime = (time: number) => {
-    // This would be called when clicking on a paragraph with a timestamp
-    setCurrentTime(time);
+  const handleJumpToTimeSetup = (jumpToTimeFn: (time: number) => void) => {
+    jumpToTimeRef.current = jumpToTimeFn;
+  };
+
+  const handleSegmentClick = (segmentStartTime: number) => {
+    console.log(`Jumping to segment at ${segmentStartTime}s`);
+    if (jumpToTimeRef.current) {
+      jumpToTimeRef.current(segmentStartTime);
+    }
   };
 
   // Extract statistics from the transcript
@@ -142,26 +150,28 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
+        {/* Audio Player - Place it before the editor for better UX */}
+        {audioUrl && (
+          <div className="mb-4">
+            <AudioPlayer 
+              src={audioUrl} 
+              onTimeUpdate={handleTimeUpdate} 
+              onJumpToTime={handleJumpToTimeSetup}
+            />
+          </div>
+        )}
+
         {/* Lexical Editor */}
         <LexicalEditor 
           initialText={transcript}
           segments={segments}
-          className="mb-4"
+          className="mb-4 mt-4"
           onEditorMount={handleEditorMount}
           onEditorChange={handleEditorChange}
           currentTimeInSeconds={currentTime}
+          onSegmentClick={handleSegmentClick}
+          bufferTimeSeconds={bufferTimeSeconds}
         />
-        
-        {/* Audio Player */}
-        {audioUrl && (
-          <div className="mt-4">
-            <AudioPlayer 
-              src={audioUrl} 
-              onTimeUpdate={handleTimeUpdate} 
-              onJumpToTime={jumpToTime}
-            />
-          </div>
-        )}
         
         <div className="mt-6 text-center">
           <Button onClick={onReset}>Transcribe Another File</Button>
