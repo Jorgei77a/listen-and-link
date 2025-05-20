@@ -34,10 +34,8 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
         heading: {
           levels: [1, 2, 3],
         },
-        // Configure other StarterKit extensions if needed
       }),
       Underline,
-      // No need to add BulletList and ListItem as they're already in StarterKit
     ],
     content: content,
     editorProps: {

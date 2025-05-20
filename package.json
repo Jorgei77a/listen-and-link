@@ -46,7 +46,7 @@
     "@tiptap/extension-heading": "^2.12.0",
     "@tiptap/extension-list-item": "^2.2.3",
     "@tiptap/extension-underline": "^2.12.0",
-    "@tiptap/react": "^2.2.3",
+    "@tiptap/react": "^2.12.0",
     "@tiptap/starter-kit": "^2.2.3",
     "@types/uuid": "^10.0.0",
     "class-variance-authority": "^0.7.1",
