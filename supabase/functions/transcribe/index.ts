@@ -156,10 +156,13 @@ async function processTranscription(
     
     // Process file based on size
     let transcript = '';
+    let audioDuration = 0; // To store the detected duration in seconds
     
     if (fileData.size <= MAX_FILE_SIZE) {
       // Process small file normally
-      transcript = await processAudioChunk(fileData, fileName);
+      const result = await processAudioChunk(fileData, fileName);
+      transcript = result.text;
+      audioDuration = result.duration || 0;
       
       // Update status to show transcription is done
       await updateTranscriptionProgress(
@@ -170,13 +173,38 @@ async function processTranscription(
       );
     } else {
       // Large file needs intelligent chunking
-      transcript = await processLargeFile(supabase, transcriptionId, fileData, fileName);
+      const result = await processLargeFile(supabase, transcriptionId, fileData, fileName);
+      transcript = result.text;
+      audioDuration = result.duration || 0;
     }
     
-    // Update transcription with result
-    await updateTranscriptionStatus(supabase, transcriptionId, 'completed', transcript);
+    // Update transcription with result and audio duration
+    await updateTranscriptionStatus(
+      supabase, 
+      transcriptionId, 
+      'completed', 
+      transcript, 
+      null, 
+      audioDuration
+    );
     
-    console.log(`Transcription completed successfully for ${fileName}`);
+    console.log(`Transcription completed successfully for ${fileName}, duration: ${audioDuration} seconds`);
+    
+    // Update user's monthly usage with the audio duration
+    try {
+      const { data: transcriptionData } = await supabase
+        .from('transcriptions')
+        .select('id')
+        .eq('id', transcriptionId)
+        .single();
+        
+      if (transcriptionData) {
+        // Audio duration is now tracked in the transcriptions table
+        console.log(`Audio duration for ${transcriptionId}: ${audioDuration} seconds`);
+      }
+    } catch (error) {
+      console.error('Error updating user usage:', error);
+    }
     
   } catch (error) {
     console.error(`Transcription processing error for ${fileName}:`, error);
@@ -192,12 +220,13 @@ async function processTranscription(
 }
 
 // Process a single audio chunk with Whisper API
-async function processAudioChunk(audioData: Blob, fileName: string): Promise<string> {
+async function processAudioChunk(audioData: Blob, fileName: string): Promise<{text: string, duration?: number}> {
   console.log(`Processing audio chunk: ${fileName}, size: ${audioData.size} bytes`);
   
   const formData = new FormData();
   formData.append('file', audioData, fileName);
   formData.append('model', 'whisper-1');
+  formData.append('response_format', 'verbose_json'); // Request detailed response including duration
   
   const openaiResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST',
@@ -214,7 +243,34 @@ async function processAudioChunk(audioData: Blob, fileName: string): Promise<str
   }
   
   const result = await openaiResponse.json();
-  return result.text;
+  
+  // Extract audio duration if available
+  const duration = result.duration || estimateAudioDuration(audioData.size, fileName.split('.').pop() || '');
+  
+  return {
+    text: result.text,
+    duration: duration
+  };
+}
+
+// Estimate audio duration based on file size and format (fallback method)
+function estimateAudioDuration(fileSize: number, format: string): number {
+  // These are very rough estimates and will not be accurate
+  // Format-specific bitrate estimates in bits per second
+  const bitrates: {[key: string]: number} = {
+    'mp3': 128000,    // 128 kbps
+    'mp4': 192000,    // 192 kbps
+    'm4a': 192000,    // 192 kbps
+    'wav': 1411000,   // CD quality, 1411 kbps
+    'webm': 128000,   // Varies widely, using 128 kbps as estimate
+    'mpeg': 128000,   // 128 kbps
+    'mpga': 128000,   // 128 kbps
+  };
+  
+  const bitrate = bitrates[format] || 128000;
+  const durationSeconds = Math.round((fileSize * 8) / bitrate);
+  
+  return durationSeconds;
 }
 
 // Process large audio file by format-aware chunking
@@ -223,7 +279,7 @@ async function processLargeFile(
   transcriptionId: string,
   fileData: Blob, 
   fileName: string
-): Promise<string> {
+): Promise<{text: string, duration?: number}> {
   console.log(`Processing large file: ${fileName}, size: ${fileData.size} bytes`);
   
   const fileExt = fileName.split('.').pop()?.toLowerCase() || '';
@@ -272,7 +328,7 @@ async function processAudioWithHeaders(
   fileExt: string,
   fileName: string,
   chunkSize: number
-): Promise<string> {
+): Promise<{text: string, duration?: number}> {
   // For m4a/mp4 files, we'll try to create segments with synthetic headers
   // This is a simplified approach - production code would need a proper audio processing library
   
@@ -289,6 +345,7 @@ async function processAudioWithHeaders(
   
   const transcriptions: string[] = [];
   let processedChunks = 0;
+  let totalDuration = 0;
   
   // Process each content chunk with header prepended
   for (let i = 0; i < numChunks; i++) {
@@ -315,8 +372,11 @@ async function processAudioWithHeaders(
     const chunkName = `${fileName.split('.')[0]}_chunk${i+1}.${fileExt}`;
     
     try {
-      const chunkTranscription = await processAudioChunk(chunkBlob, chunkName);
-      transcriptions.push(chunkTranscription);
+      const chunkResult = await processAudioChunk(chunkBlob, chunkName);
+      transcriptions.push(chunkResult.text);
+      if (chunkResult.duration) {
+        totalDuration += chunkResult.duration;
+      }
       processedChunks++;
       
       console.log(`Completed segment ${i+1}/${numChunks}`);
@@ -328,8 +388,16 @@ async function processAudioWithHeaders(
   
   console.log(`Processed ${processedChunks}/${numChunks} segments successfully`);
   
+  // If we don't have reliable duration data from API, estimate it
+  if (totalDuration === 0) {
+    totalDuration = estimateAudioDuration(fileBytes.length, fileExt);
+  }
+  
   // Combine all transcriptions
-  return transcriptions.join(' ');
+  return {
+    text: transcriptions.join(' '),
+    duration: totalDuration
+  };
 }
 
 // Process audio with regular chunking + small overlaps
@@ -340,7 +408,7 @@ async function processRegularChunks(
   fileExt: string,
   fileName: string,
   chunkSize: number
-): Promise<string> {
+): Promise<{text: string, duration?: number}> {
   // Add small overlaps between chunks to ensure no content is lost
   const overlap = 1024 * 512; // 512KB overlap
   const effectiveChunkSize = chunkSize - overlap;
@@ -351,6 +419,7 @@ async function processRegularChunks(
   
   const transcriptions: string[] = [];
   let processedChunks = 0;
+  let totalDuration = 0;
   
   // Process each chunk
   for (let i = 0; i < numChunks; i++) {
@@ -374,9 +443,23 @@ async function processRegularChunks(
     
     try {
       // Process this chunk
-      const chunkTranscription = await processAudioChunk(chunkBlob, chunkName);
+      const chunkResult = await processAudioChunk(chunkBlob, chunkName);
       
-      transcriptions.push(chunkTranscription);
+      transcriptions.push(chunkResult.text);
+      if (chunkResult.duration) {
+        // For overlapping chunks, we need to estimate actual duration
+        // This is simplified and not entirely accurate
+        const chunkDuration = chunkResult.duration;
+        if (i < numChunks - 1) {
+          // Estimate overlap duration (rough approximation)
+          const overlapDuration = (overlap / chunkData.length) * chunkDuration;
+          totalDuration += (chunkDuration - overlapDuration);
+        } else {
+          // Last chunk has no following overlap
+          totalDuration += chunkDuration;
+        }
+      }
+      
       processedChunks++;
       
       console.log(`Chunk ${i+1} transcription complete`);
@@ -388,8 +471,16 @@ async function processRegularChunks(
   
   console.log(`Processed ${processedChunks}/${numChunks} chunks successfully`);
   
+  // If we don't have reliable duration data from API, estimate it
+  if (totalDuration === 0) {
+    totalDuration = estimateAudioDuration(fileBytes.length, fileExt);
+  }
+  
   // Combine all transcriptions
-  return transcriptions.join(' ');
+  return {
+    text: transcriptions.join(' '),
+    duration: totalDuration
+  };
 }
 
 // Helper function to update transcription status
@@ -398,7 +489,8 @@ async function updateTranscriptionStatus(
   id: string,
   status: string,
   transcript: string | null = null,
-  error: string | null = null
+  error: string | null = null,
+  audioDuration: number | null = null
 ) {
   const updateData: Record<string, any> = {
     status,
@@ -411,6 +503,10 @@ async function updateTranscriptionStatus(
   
   if (error !== null) {
     updateData.error = error;
+  }
+  
+  if (audioDuration !== null) {
+    updateData.audio_duration = audioDuration;
   }
   
   const { error: updateError } = await supabase

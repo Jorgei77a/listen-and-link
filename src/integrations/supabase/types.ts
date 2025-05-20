@@ -92,6 +92,7 @@ export type Database = {
       }
       transcriptions: {
         Row: {
+          audio_duration: number | null
           created_at: string | null
           custom_title: string | null
           error: string | null
@@ -99,11 +100,13 @@ export type Database = {
           file_path: string
           file_size: number
           id: string
+          progress_message: string | null
           status: string
           transcript: string | null
           updated_at: string | null
         }
         Insert: {
+          audio_duration?: number | null
           created_at?: string | null
           custom_title?: string | null
           error?: string | null
@@ -111,11 +114,13 @@ export type Database = {
           file_path: string
           file_size: number
           id?: string
+          progress_message?: string | null
           status?: string
           transcript?: string | null
           updated_at?: string | null
         }
         Update: {
+          audio_duration?: number | null
           created_at?: string | null
           custom_title?: string | null
           error?: string | null
@@ -123,6 +128,7 @@ export type Database = {
           file_path?: string
           file_size?: number
           id?: string
+          progress_message?: string | null
           status?: string
           transcript?: string | null
           updated_at?: string | null
@@ -166,6 +172,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_usage: {
+        Row: {
+          created_at: string | null
+          id: string
+          minutes_used: number | null
+          month_year: string
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          minutes_used?: number | null
+          month_year: string
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          minutes_used?: number | null
+          month_year?: string
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
       }
     }
     Views: {

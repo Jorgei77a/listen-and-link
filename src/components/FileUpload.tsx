@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { Upload, Lock } from "lucide-react";
+import { Upload, Lock, Clock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { v4 as uuidv4 } from "uuid";
 import { Input } from "@/components/ui/input";
@@ -33,10 +33,20 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
   const [uploading, setUploading] = useState(false);
   const [customTitle, setCustomTitle] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [estimatedDuration, setEstimatedDuration] = useState<number | null>(null);
   
   // Use our subscription context
-  const { getTierLimits, currentTier, hasFeature } = useSubscription();
+  const { 
+    getTierLimits, 
+    currentTier, 
+    hasFeature, 
+    userUsage,
+    checkMonthlyUsage,
+    updateMonthlyUsage 
+  } = useSubscription();
+  
   const maxFileSize = getTierLimits('maxFileSize');
+  const maxMonthlyMinutes = getTierLimits('maxMonthlyMinutes');
   const canUseCustomTitles = hasFeature('custom_titles');
   
   const handleDrag = (e: React.DragEvent) => {
@@ -67,6 +77,28 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     }
   };
 
+  // Estimate audio duration based on file size and format
+  const estimateAudioDuration = (file: File): number => {
+    // Format-specific bitrate estimates in bits per second
+    const bitrates: {[key: string]: number} = {
+      'mp3': 128000,    // 128 kbps
+      'mp4': 192000,    // 192 kbps
+      'm4a': 192000,    // 192 kbps
+      'wav': 1411000,   // CD quality, 1411 kbps
+      'webm': 128000,   // Varies widely, using 128 kbps as estimate
+      'mpeg': 128000,   // 128 kbps
+      'mpga': 128000,   // 128 kbps
+    };
+    
+    const fileExt = file.name.split('.').pop()?.toLowerCase() || 'mp3';
+    const bitrate = bitrates[fileExt] || 128000;
+    
+    // Calculate duration in seconds (file size in bits / bitrate)
+    const durationSeconds = Math.round((file.size * 8) / bitrate);
+    
+    return durationSeconds;
+  };
+
   const validateAndSetFile = (file: File) => {
     // Check file type - updated to match Whisper supported formats
     const validAudioTypes = [
@@ -95,6 +127,27 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
       const sizeMB = Math.round(maxFileSize / (1024 * 1024));
       toast.error(
         `File exceeds the ${sizeMB}MB limit for your ${currentTier} plan. Please upgrade for larger files.`,
+        {
+          action: {
+            label: 'Upgrade',
+            onClick: () => {
+              toast("This would navigate to upgrade page");
+            },
+          },
+        }
+      );
+      return;
+    }
+    
+    // Estimate audio duration and check against monthly limits
+    const estimatedSeconds = estimateAudioDuration(file);
+    setEstimatedDuration(estimatedSeconds);
+    
+    // Check if adding this audio would exceed monthly limits
+    if (userUsage && !checkMonthlyUsage(estimatedSeconds)) {
+      const estimatedMinutes = Math.round(estimatedSeconds / 60);
+      toast.error(
+        `This ${estimatedMinutes} minute audio would exceed your monthly limit of ${maxMonthlyMinutes} minutes. Please upgrade your plan.`,
         {
           action: {
             label: 'Upgrade',
@@ -173,7 +226,7 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabase.auth.getSession()}`
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
         },
         body: JSON.stringify({
           filePath: filePath,
@@ -190,6 +243,16 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
 
       const result = await response.json();
       toast.success('File uploaded and transcription started');
+      
+      // If we have an estimated duration, preemptively update usage
+      // The actual duration will be updated when processing completes
+      if (estimatedDuration !== null) {
+        try {
+          await updateMonthlyUsage(estimatedDuration);
+        } catch (error) {
+          console.error('Failed to update usage estimate:', error);
+        }
+      }
       
       // Pass the file, transcription ID, and custom title to parent component
       onFileUpload(selectedFile, result.id, finalTitle);
@@ -210,6 +273,15 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const formatTime = (seconds: number): string => {
+    if (seconds < 60) return `${seconds} seconds`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return remainingSeconds > 0 
+      ? `${minutes} min ${remainingSeconds} sec`
+      : `${minutes} minutes`;
+  };
+
   // Calculate max size for display
   const maxSizeMB = Math.round(maxFileSize / (1024 * 1024));
 
@@ -217,6 +289,30 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     <>
       <Card className="w-full max-w-2xl mx-auto p-6 shadow-lg">
         <div className="space-y-6">
+          {userUsage && (
+            <div className="space-y-2 mb-4">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Monthly Usage</span>
+                </div>
+                <span className="text-sm">
+                  {Math.round(userUsage.minutesUsed)} / {userUsage.monthlyLimit} minutes
+                </span>
+              </div>
+              <Progress 
+                value={userUsage.percentUsed}
+                className={userUsage.percentUsed > 90 ? "bg-red-100" : ""} 
+              />
+              <p className="text-xs text-muted-foreground text-right">
+                {userUsage.percentUsed >= 100 
+                  ? "Monthly limit reached. Upgrade to process more audio." 
+                  : `${Math.round(userUsage.monthlyLimit - userUsage.minutesUsed)} minutes remaining this month`
+                }
+              </p>
+            </div>
+          )}
+
           <div 
             className={`file-drop-area border-2 border-dashed rounded-lg p-8 ${dragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'}`}
             onDragEnter={handleDrag}
@@ -234,9 +330,13 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
                 <p className="text-xs text-muted-foreground mt-1">
                   Supports MP3, WAV, OGG, and other audio formats (max {maxSizeMB}MB)
                 </p>
-                <div className="mt-2">
+                <div className="mt-2 flex flex-col gap-1">
                   <Badge variant="outline" className="text-xs">
                     {currentTier.charAt(0).toUpperCase() + currentTier.slice(1)} Plan
+                  </Badge>
+                  <Badge variant="outline" className="text-xs flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {maxMonthlyMinutes} minutes per month
                   </Badge>
                 </div>
               </div>
@@ -244,7 +344,7 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
                 type="button"
                 onClick={() => inputRef.current?.click()}
                 className="mt-4"
-                disabled={isProcessing || uploading}
+                disabled={isProcessing || uploading || (userUsage?.percentUsed || 0) >= 100}
               >
                 Select File
               </Button>
@@ -317,9 +417,9 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {formatFileSize(selectedFile.size)}
-                    {selectedFile.size > 23 * 1024 * 1024 && (
-                      <span className="text-yellow-600 ml-2">
-                        (Will be chunked for processing)
+                    {estimatedDuration && (
+                      <span className="ml-2">
+                        • Est. duration: {formatTime(estimatedDuration)}
                       </span>
                     )}
                   </p>

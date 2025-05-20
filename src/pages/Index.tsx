@@ -8,6 +8,7 @@ import Features from "@/components/Features";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { SubscriptionBadge } from "@/components/SubscriptionBadge";
+import { useSubscription } from "@/context/SubscriptionContext";
 
 const Index = () => {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -16,6 +17,9 @@ const Index = () => {
   const [currentTranscriptionId, setCurrentTranscriptionId] = useState<string | null>(null);
   const [customTitle, setCustomTitle] = useState<string>("");
   const [transcriptionCompleted, setTranscriptionCompleted] = useState(false);
+  const [audioDuration, setAudioDuration] = useState<number | null>(null);
+  
+  const { updateMonthlyUsage } = useSubscription();
 
   // Poll for transcription status if we have an ID
   useEffect(() => {
@@ -24,7 +28,7 @@ const Index = () => {
     const checkTranscription = async () => {
       const { data, error } = await supabase
         .from('transcriptions')
-        .select('*')
+        .select('*, audio_duration')
         .eq('id', currentTranscriptionId)
         .single();
       
@@ -38,6 +42,18 @@ const Index = () => {
           setTranscript(data.transcript);
           setIsProcessing(false);
           
+          // Store the audio duration
+          if (data.audio_duration) {
+            setAudioDuration(data.audio_duration);
+            
+            // Update monthly usage with the actual audio duration
+            try {
+              await updateMonthlyUsage(data.audio_duration);
+            } catch (error) {
+              console.error('Failed to update usage:', error);
+            }
+          }
+          
           // Only show completion toast if we haven't already
           if (!transcriptionCompleted) {
             toast.success("Transcription complete!");
@@ -46,19 +62,23 @@ const Index = () => {
         } else if (data.status === 'failed') {
           setIsProcessing(false);
           toast.error(`Transcription failed: ${data.error || 'Unknown error'}`);
+        } else if (data.progress_message) {
+          // Show progress messages if available
+          console.log(`Transcription progress: ${data.progress_message}`);
         }
       }
     };
     
     const intervalId = setInterval(checkTranscription, 3000);
     return () => clearInterval(intervalId);
-  }, [currentTranscriptionId, transcriptionCompleted]);
+  }, [currentTranscriptionId, transcriptionCompleted, updateMonthlyUsage]);
 
   const handleFileUpload = async (file: File, transcriptionId?: string, title?: string) => {
     setIsProcessing(true);
     setCurrentFileName(file.name);
     setCustomTitle(title || file.name.split('.')[0]);
     setTranscriptionCompleted(false);
+    setAudioDuration(null);
     
     if (transcriptionId) {
       setCurrentTranscriptionId(transcriptionId);
@@ -71,6 +91,7 @@ const Index = () => {
     setCurrentTranscriptionId(null);
     setCustomTitle("");
     setTranscriptionCompleted(false);
+    setAudioDuration(null);
   };
 
   return (
@@ -96,6 +117,7 @@ const Index = () => {
               transcript={transcript} 
               fileName={currentFileName}
               customTitle={customTitle}
+              audioDuration={audioDuration}
               onReset={handleReset} 
             />
           ) : (
