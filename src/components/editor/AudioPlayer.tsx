@@ -1,5 +1,5 @@
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Play, Pause, SkipBack, SkipForward, Loader2 } from "lucide-react";
@@ -23,34 +23,40 @@ export function AudioPlayer({
   const [isLoading, setIsLoading] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
+  
+  // Refs to prevent infinite loops
   const audioRef = useRef<HTMLAudioElement>(null);
   const seekQueueRef = useRef<number | null>(null);
   const playAfterSeekRef = useRef(false);
   const seekOperationInProgressRef = useRef(false);
+  const lastTimeUpdateRef = useRef(0);
+  const timeUpdateThrottleRef = useRef(false);
+  const prevTimeRef = useRef(0);
+  const srcRef = useRef(src);
+  const onTimeUpdateRef = useRef(onTimeUpdate);
+  const lastReportedTimeRef = useRef(-1);
+  
+  // Update refs when props change
+  useEffect(() => {
+    srcRef.current = src;
+    onTimeUpdateRef.current = onTimeUpdate;
+  }, [src, onTimeUpdate]);
 
-  const togglePlayPause = () => {
-    console.log("📢 AudioPlayer: Toggle Play/Pause called, current state:", isPlaying ? "playing" : "paused");
-    
-    if (!audioRef.current) {
-      console.error("📢 AudioPlayer: Audio element ref is null");
-      return;
-    }
+  // Memoized toggle play/pause to prevent recreating on every render
+  const togglePlayPause = useCallback(() => {
+    if (!audioRef.current) return;
 
     if (isPlaying) {
-      console.log("📢 AudioPlayer: Pausing audio");
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      console.log("📢 AudioPlayer: Attempting to play audio");
       playAudio();
     }
-  };
+  }, [isPlaying]);
 
-  // Separated play logic for better reusability
-  const playAudio = () => {
+  // Separated play logic
+  const playAudio = useCallback(() => {
     if (!audioRef.current) return;
-    
-    console.log("📢 AudioPlayer: playAudio called with readyState:", audioRef.current.readyState);
     
     // Handle buffering state
     if (audioRef.current.readyState < 3) {
@@ -61,223 +67,218 @@ export function AudioPlayer({
     if (playPromise !== undefined) {
       playPromise
         .then(() => {
-          console.log("📢 AudioPlayer: Playback started successfully");
           setIsPlaying(true);
           setIsBuffering(false);
         })
         .catch(error => {
-          console.error("📢 AudioPlayer: Playback error:", error);
-          // Only update state if an actual error (not an aborted operation)
           if (error.name !== 'AbortError') {
             setIsPlaying(false);
             setIsBuffering(false);
           }
         });
     }
-  };
+  }, []);
 
-  const skipForward = () => {
-    console.log("📢 AudioPlayer: Skip forward called");
+  // Memoized skip functions
+  const skipForward = useCallback(() => {
     if (audioRef.current) {
       const newTime = Math.min(audioRef.current.currentTime + 5, duration);
-      console.log(`📢 AudioPlayer: Skipping forward to ${newTime}s`);
       jumpToTime(newTime);
     }
-  };
+  }, [duration]);
 
-  const skipBackward = () => {
-    console.log("📢 AudioPlayer: Skip backward called");
+  const skipBackward = useCallback(() => {
     if (audioRef.current) {
       const newTime = Math.max(audioRef.current.currentTime - 5, 0);
-      console.log(`📢 AudioPlayer: Skipping backward to ${newTime}s`);
       jumpToTime(newTime);
     }
-  };
+  }, []);
 
-  // Completely revised jumpToTime function with better state management
-  const jumpToTime = (time: number) => {
-    if (!audioRef.current) {
-      console.error("📢 AudioPlayer: jumpToTime - Audio element ref is null");
-      return;
-    }
+  // Revised jumpToTime function with better state management
+  const jumpToTime = useCallback((time: number) => {
+    if (!audioRef.current) return;
     
-    console.log(`📢 AudioPlayer: jumpToTime called with time=${time}, current play state=${isPlaying ? "playing" : "paused"}, readyState=${audioRef.current.readyState}`);
+    // Prevent triggering time updates while seeking
+    if (Math.abs(time - prevTimeRef.current) < 0.1) return;
+    prevTimeRef.current = time;
     
-    // If we're already seeking, queue this request instead of executing immediately
+    // If seeking in progress, queue this request
     if (seekOperationInProgressRef.current) {
-      console.log(`📢 AudioPlayer: Seek operation already in progress, queueing time=${time}`);
       seekQueueRef.current = time;
       return;
     }
     
-    // Set that we're now seeking
+    // Set seeking flags
     seekOperationInProgressRef.current = true;
     setIsSeeking(true);
     
-    // Update UI immediately for responsiveness
+    // Update UI
     setCurrentTime(time);
     
-    // Store if we should play after seeking
+    // Store play state
     playAfterSeekRef.current = isPlaying || audioRef.current.paused === false;
     
-    // If we were playing, we need to pause first to avoid race conditions
+    // Pause first to avoid race conditions
     if (!audioRef.current.paused) {
-      console.log("📢 AudioPlayer: Pausing before seeking to avoid race conditions");
-      // Just pause, don't update state as we'll resume after seeking
       audioRef.current.pause();
     }
     
-    // Update audio element's time - this will trigger the seeking event
-    console.log(`📢 AudioPlayer: Setting currentTime to ${time}`);
+    // Set time without triggering unnecessary callbacks
     audioRef.current.currentTime = time;
     
-    // Trigger the callback if provided
-    if (onTimeUpdate) {
-      console.log(`📢 AudioPlayer: Calling onTimeUpdate with time=${time}`);
-      onTimeUpdate(time);
+    // Only call external updates if the time has changed enough
+    if (onTimeUpdateRef.current && Math.abs(time - lastReportedTimeRef.current) > 0.1) {
+      lastReportedTimeRef.current = time;
+      onTimeUpdateRef.current(time);
     }
+  }, [isPlaying]);
 
-    // We'll resume playback in the seeked event handler if needed
-  };
-
-  const handleTimeUpdate = () => {
-    if (audioRef.current) {
-      const newTime = audioRef.current.currentTime;
-      // Only log every second to avoid console spam
-      if (Math.floor(newTime) !== Math.floor(currentTime)) {
-        console.log(`📢 AudioPlayer: Time updated to ${newTime.toFixed(2)}s`);
+  // Throttled time update handling
+  const handleTimeUpdate = useCallback(() => {
+    if (!audioRef.current || timeUpdateThrottleRef.current) return;
+    
+    const newTime = audioRef.current.currentTime;
+    
+    // Debounce frequent updates
+    if (Date.now() - lastTimeUpdateRef.current < 100) {
+      if (!timeUpdateThrottleRef.current) {
+        timeUpdateThrottleRef.current = true;
+        setTimeout(() => {
+          timeUpdateThrottleRef.current = false;
+          if (audioRef.current) handleTimeUpdate();
+        }, 100);
       }
-      
+      return;
+    }
+    
+    lastTimeUpdateRef.current = Date.now();
+    
+    // Only update if time changed significantly (prevents loops)
+    if (Math.abs(newTime - currentTime) > 0.1) {
       setCurrentTime(newTime);
       
-      // Update parent component if callback provided
-      if (onTimeUpdate) {
-        onTimeUpdate(newTime);
+      // Only call external updates if seeking is not in progress
+      if (onTimeUpdateRef.current && !seekOperationInProgressRef.current && 
+          Math.abs(newTime - lastReportedTimeRef.current) > 0.1) {
+        lastReportedTimeRef.current = newTime;
+        onTimeUpdateRef.current(newTime);
       }
     }
-  };
+  }, [currentTime]);
 
-  const handleLoadedMetadata = () => {
+  // Handlers with better loop prevention
+  const handleLoadedMetadata = useCallback(() => {
     if (audioRef.current) {
       const audioDuration = audioRef.current.duration;
-      console.log(`📢 AudioPlayer: Audio metadata loaded, duration=${audioDuration}s, src=${src}`);
       setDuration(audioDuration);
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
-    console.log(`📢 AudioPlayer: Manual seek to ${time}s via slider`);
     jumpToTime(time);
-  };
+  }, [jumpToTime]);
 
-  const formatTime = (time: number) => {
+  // Memoized formatting function
+  const formatTime = useCallback((time: number) => {
     const minutes = Math.floor(time / 60);
     const seconds = Math.floor(time % 60);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
+  }, []);
 
-  const handleCanPlay = () => {
-    console.log("📢 AudioPlayer: Audio can play event fired");
+  // Optimized event handlers
+  const handleCanPlay = useCallback(() => {
     setIsLoading(false);
     setIsBuffering(false);
-  };
+  }, []);
 
-  const handleWaiting = () => {
-    console.log("📢 AudioPlayer: Audio waiting event fired");
-    setIsLoading(true);
+  const handleWaiting = useCallback(() => {
     setIsBuffering(true);
-  };
+  }, []);
 
-  const handlePlay = () => {
-    console.log("📢 AudioPlayer: Audio play event fired");
+  const handlePlay = useCallback(() => {
     setIsPlaying(true);
-  };
+  }, []);
 
-  const handlePause = () => {
-    console.log("📢 AudioPlayer: Audio pause event fired");
-    // Only update the playing state if we're not in the middle of a seek operation
+  const handlePause = useCallback(() => {
     if (!seekOperationInProgressRef.current) {
       setIsPlaying(false);
     }
-  };
+  }, []);
 
-  const handleSeeking = () => {
-    console.log(`📢 AudioPlayer: Audio seeking event fired, seeking to ${audioRef.current?.currentTime}s`);
+  const handleSeeking = useCallback(() => {
     setIsSeeking(true);
     setIsBuffering(true);
-  };
+  }, []);
 
-  const handleSeeked = () => {
+  const handleSeeked = useCallback(() => {
     if (!audioRef.current) return;
     
     const currentSeekTime = audioRef.current.currentTime;
-    console.log(`📢 AudioPlayer: Audio seeked event fired, now at ${currentSeekTime}s`);
     
-    // Mark that we're no longer seeking
+    // Clear seeking states
     setIsSeeking(false);
     setIsBuffering(false);
     
-    // If we should resume playback after seeking
+    // Resume playback if needed
     if (playAfterSeekRef.current) {
-      console.log("📢 AudioPlayer: Resuming playback after seek");
-      // Use setTimeout to let the browser catch up after the seeking operation
+      // Delayed resume to let browser catch up
       setTimeout(() => {
-        if (!audioRef.current) return;
-        
-        // Ensure we're still at the right position and not at 0 due to some browsers resetting
-        if (Math.abs(audioRef.current.currentTime - currentSeekTime) > 0.5) {
-          console.log(`📢 AudioPlayer: Detected time drift after seeking, correcting to ${currentSeekTime}`);
-          audioRef.current.currentTime = currentSeekTime;
+        if (audioRef.current) {
+          // Check for time drift
+          if (Math.abs(audioRef.current.currentTime - currentSeekTime) > 0.5) {
+            audioRef.current.currentTime = currentSeekTime;
+          }
+          
+          playAudio();
+          playAfterSeekRef.current = false;
         }
-        
-        playAudio();
-        playAfterSeekRef.current = false;
       }, 50);
     }
     
-    // Check if we have queued seeks and process them
+    // Process queued seeks
     setTimeout(() => {
       seekOperationInProgressRef.current = false;
       
       if (seekQueueRef.current !== null) {
         const nextSeekTime = seekQueueRef.current;
         seekQueueRef.current = null;
-        console.log(`📢 AudioPlayer: Processing queued seek to ${nextSeekTime}s`);
         jumpToTime(nextSeekTime);
       }
     }, 100);
-  };
+  }, [playAudio]);
 
-  const handleEnded = () => {
-    console.log("📢 AudioPlayer: Audio ended event fired");
+  const handleEnded = useCallback(() => {
     setIsPlaying(false);
-  };
+  }, []);
 
-  const handleError = (e: React.SyntheticEvent<HTMLAudioElement, Event>) => {
-    const target = e.target as HTMLAudioElement;
-    console.error("📢 AudioPlayer: Audio error event fired", target.error);
+  const handleError = useCallback(() => {
     setIsLoading(false);
     setIsPlaying(false);
     setIsBuffering(false);
-    // Reset seek operation status to prevent deadlocks
     seekOperationInProgressRef.current = false;
-  };
+  }, []);
 
-  // Effect to handle external time jumps from text clicks
+  // Jump to time registration with proper cleanup
   useEffect(() => {
     if (onJumpToTime && audioRef.current) {
-      console.log("📢 AudioPlayer: Registering jumpToTime callback");
-      // Register the jumpToTime function as a callback
       onJumpToTime(jumpToTime);
     }
-  }, [onJumpToTime]);
+    
+    return () => {
+      // Cleanup to prevent memory leaks
+      lastTimeUpdateRef.current = 0;
+      timeUpdateThrottleRef.current = false;
+      seekOperationInProgressRef.current = false;
+      seekQueueRef.current = null;
+    };
+  }, [jumpToTime, onJumpToTime]);
 
-  // Effect to handle src changes
+  // Handle src changes with proper cleanup
   useEffect(() => {
-    if (src) {
-      console.log(`📢 AudioPlayer: Source changed to ${src}`);
+    if (src && src !== srcRef.current) {
+      // Reset all state and refs
       setIsLoading(true);
       setIsPlaying(false);
       setCurrentTime(0);
@@ -285,13 +286,17 @@ export function AudioPlayer({
       seekOperationInProgressRef.current = false;
       seekQueueRef.current = null;
       playAfterSeekRef.current = false;
+      lastReportedTimeRef.current = -1;
+      lastTimeUpdateRef.current = 0;
       
-      // Reset audio element when src changes
+      // Reset and reload audio
       if (audioRef.current) {
+        audioRef.current.pause();
         audioRef.current.currentTime = 0;
         audioRef.current.load();
-        console.log("📢 AudioPlayer: Audio element reset and reloaded");
       }
+      
+      srcRef.current = src;
     }
   }, [src]);
 
@@ -311,7 +316,7 @@ export function AudioPlayer({
         onEnded={handleEnded}
         onError={handleError}
         preload="metadata"
-        playsInline // Better mobile support
+        playsInline
       />
       
       <div className="flex items-center justify-center space-x-2">
@@ -377,15 +382,16 @@ export function AudioPlayer({
         </span>
       </div>
 
-      {/* Enhanced visual debugging indicators */}
+      {/* Visual indicators - simplified to reduce DOM updates */}
       <div className="text-xs text-center text-muted-foreground">
-        {isSeeking && <span className="animate-pulse">Seeking... </span>}
-        {isBuffering && <span className="animate-pulse">Buffering... </span>}
-        {isLoading && <span className="animate-pulse">Loading... </span>}
+        {(isSeeking || isBuffering || isLoading) && (
+          <span className="animate-pulse">
+            {isSeeking ? "Seeking" : isBuffering ? "Buffering" : "Loading"}...{" "}
+          </span>
+        )}
         <span className={isPlaying ? "text-green-600 font-medium" : ""}>
           {isPlaying ? "Playing" : "Paused"}
         </span>
-        {playAfterSeekRef.current && <span className="ml-1 text-blue-500">(Resume pending)</span>}
       </div>
     </div>
   );

@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -10,7 +9,6 @@ import { LexicalEditor } from "@/components/editor/LexicalEditor";
 import { AudioPlayer } from "@/components/editor/AudioPlayer";
 import { ExportOptions } from "@/components/editor/ExportOptions";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
-import { useSubscription } from "@/context/SubscriptionContext";
 
 interface TranscriptionDisplayProps {
   transcript: string;
@@ -62,67 +60,94 @@ const TranscriptionDisplay = ({
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
+  
+  // Refs to prevent infinite loops and throttle updates
   const audioPlayerCallbackRef = useRef<((time: number) => void) | null>(null);
   const lastSegmentClickTimeRef = useRef<number>(0);
+  const lastTimeUpdateRef = useRef<number>(0);
+  const isUpdatingTimeRef = useRef<boolean>(false);
+  const currentTimeRef = useRef<number | null>(currentTime);
+  
+  // Keep currentTimeRef in sync
+  useEffect(() => {
+    currentTimeRef.current = currentTime;
+  }, [currentTime]);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
-  const handleCopy = () => {
+  // Memoized handlers
+  const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(transcript);
     setCopied(true);
     toast.success("Transcript copied to clipboard!");
     setTimeout(() => setCopied(false), 2000);
-  };
+  }, [transcript]);
 
-  const handleEditorMount = (editorInstance: LexicalEditorType) => {
-    console.log("🔍 TranscriptionDisplay: Editor mounted successfully");
+  const handleEditorMount = useCallback((editorInstance: LexicalEditorType) => {
     setEditor(editorInstance);
     setEditorReady(true);
-  };
+  }, []);
 
-  const handleEditorChange = (editorState: EditorState) => {
+  const handleEditorChange = useCallback((editorState: EditorState) => {
     // Handle editor changes if needed
-  };
+  }, []);
 
-  const handleTimeUpdate = (time: number) => {
-    console.log(`🔍 TranscriptionDisplay: Time updated from audio player: ${time.toFixed(2)}s`);
-    setCurrentTime(time);
-  };
-
-  // Improved segment click handler with debouncing
-  const handleSegmentClick = useCallback((time: number) => {
-    console.log(`🔍 TranscriptionDisplay: Segment clicked at time ${time.toFixed(2)}s`);
+  // Throttled time update handler with loop prevention
+  const handleTimeUpdate = useCallback((time: number) => {
+    // Prevent rapid updates
+    if (Date.now() - lastTimeUpdateRef.current < 100) return;
+    lastTimeUpdateRef.current = Date.now();
     
+    // Prevent setting the same time
+    if (currentTimeRef.current !== null && Math.abs(time - currentTimeRef.current) < 0.1) return;
+    
+    // Prevent recursive updates
+    if (isUpdatingTimeRef.current) return;
+    
+    isUpdatingTimeRef.current = true;
+    setCurrentTime(time);
+    
+    // Release lock after a small delay
+    setTimeout(() => {
+      isUpdatingTimeRef.current = false;
+    }, 50);
+  }, []);
+
+  // Debounced segment click handler
+  const handleSegmentClick = useCallback((time: number) => {
     // Simple debounce for rapid clicks
     const now = Date.now();
     if (now - lastSegmentClickTimeRef.current < 500) {
-      console.log("🔍 TranscriptionDisplay: Ignoring rapid segment click");
       return;
     }
     lastSegmentClickTimeRef.current = now;
     
+    // Prevent recursive updates
+    if (isUpdatingTimeRef.current) return;
+    
+    isUpdatingTimeRef.current = true;
     setCurrentTime(time);
     
     // Call the audio player's jumpToTime function
     if (audioPlayerCallbackRef.current) {
-      console.log(`🔍 TranscriptionDisplay: Calling audio player jumpToTime with ${time.toFixed(2)}s`);
       audioPlayerCallbackRef.current(time);
-    } else {
-      console.error("🔍 TranscriptionDisplay: Audio player callback is null");
     }
+    
+    // Release lock after a small delay
+    setTimeout(() => {
+      isUpdatingTimeRef.current = false;
+    }, 100);
   }, []);
 
-  // Register the jump-to-time callback from the audio player
+  // Register the jump-to-time callback with cleanup
   const handleJumpToTimeRegistration = useCallback((callback: (time: number) => void) => {
-    console.log("🔍 TranscriptionDisplay: Jump-to-time callback registered from audio player");
     audioPlayerCallbackRef.current = callback;
     setPlayerReady(true);
+    
+    return () => {
+      audioPlayerCallbackRef.current = null;
+    };
   }, []);
-
-  // Debug effect to monitor component state
-  useEffect(() => {
-    console.log(`🔍 TranscriptionDisplay: Component state - editorReady: ${editorReady}, playerReady: ${playerReady}, audioUrl: ${audioUrl ? "set" : "not set"}`);
-  }, [editorReady, playerReady, audioUrl]);
 
   // Extract statistics from the transcript
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
@@ -176,7 +201,7 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
-        {/* Lexical Editor */}
+        {/* Lexical Editor with optimized props */}
         <LexicalEditor 
           initialText={transcript}
           segments={segments}
@@ -187,7 +212,7 @@ const TranscriptionDisplay = ({
           onSegmentClick={handleSegmentClick}
         />
         
-        {/* Audio Player */}
+        {/* Audio Player with optimized props */}
         {audioUrl && (
           <div className="mt-4">
             <AudioPlayer 
@@ -198,14 +223,10 @@ const TranscriptionDisplay = ({
           </div>
         )}
         
-        {/* Debug information */}
+        {/* Simplified debug information */}
         <div className="mt-4 p-2 bg-gray-50 rounded-md text-xs text-muted-foreground">
-          <p>Audio URL: {audioUrl ? "✅ Set" : "❌ Not set"}</p>
-          <p>Current Time: {currentTime !== null ? `${currentTime.toFixed(2)}s` : "Not set"}</p>
-          <p>Editor Ready: {editorReady ? "✅ Yes" : "❌ No"}</p>
-          <p>Player Ready: {playerReady ? "✅ Yes" : "❌ No"}</p>
-          <p>Audio Player Callback: {audioPlayerCallbackRef.current ? "✅ Registered" : "❌ Not registered"}</p>
-          <p>Segments: {segments.length}</p>
+          <p>Status: {audioUrl ? "✅ Audio loaded" : "❌ No audio"}, Editor: {editorReady ? "✅ Ready" : "❌ Loading"}, Player: {playerReady ? "✅ Ready" : "❌ Loading"}</p>
+          {currentTime !== null && <p>Position: {currentTime.toFixed(2)}s</p>}
         </div>
         
         <div className="mt-6 text-center">
