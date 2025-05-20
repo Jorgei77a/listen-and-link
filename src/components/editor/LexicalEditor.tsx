@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
@@ -18,7 +17,6 @@ import {
   LexicalNode,
   $getSelection,
   COMMAND_PRIORITY_HIGH,
-  INITIALIZED_COMMAND,
   COMMAND_PRIORITY_CRITICAL
 } from "lexical";
 import { cn } from "@/lib/utils";
@@ -133,26 +131,18 @@ export function LexicalEditor({
     };
   }, []);
 
-  // Register listener for editor initialization
+  // Register listener for editor initialization - using onMount callback instead of INITIALIZED_COMMAND
   const registerEditorListener = (editor: LexicalEditorType) => {
     editorRef.current = editor;
     
-    // Register an editor listener for initialization
-    editor.registerCommand(
-      INITIALIZED_COMMAND,
-      () => {
-        console.log("INITIALIZED_COMMAND fired");
-        setIsEditorMounted(true);
-        
-        // Call onEditorMount callback if provided
-        if (onEditorMount) {
-          onEditorMount(editor);
-        }
-        
-        return false;
-      },
-      COMMAND_PRIORITY_CRITICAL
-    );
+    // Set the editor as mounted
+    console.log("Editor instance created, setting as mounted");
+    setIsEditorMounted(true);
+    
+    // Call onEditorMount callback if provided
+    if (onEditorMount) {
+      onEditorMount(editor);
+    }
   };
 
   // Populate editor with content after initialization
@@ -352,9 +342,8 @@ export function LexicalEditor({
             ) : (
               <RichTextPlugin
                 contentEditable={
-                  <ContentEditable 
-                    ref={contentEditableRef}
-                    className="min-h-[200px] max-h-[400px] overflow-y-auto p-4 outline-none" 
+                  <ContentEditable
+                    className="min-h-[200px] max-h-[400px] overflow-y-auto p-4 outline-none"
                   />
                 }
                 placeholder={<div className="absolute top-[15px] left-[15px] text-muted-foreground">Start editing...</div>}

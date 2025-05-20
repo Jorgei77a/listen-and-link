@@ -76,7 +76,7 @@ const TranscriptionDisplay = ({
       // For security: Wait a bit longer for the DOM to be fully ready before loading editor
       const timer = setTimeout(() => {
         setIsTranscriptReady(true);
-      }, 300);
+      }, 500); // Increased delay from 300ms to 500ms
       
       return () => clearTimeout(timer);
     }
@@ -89,7 +89,7 @@ const TranscriptionDisplay = ({
     const timer = setTimeout(() => {
       setIsEditorReady(true);
       console.log("Editor initialization ready flag set to true");
-    }, 500);
+    }, 700); // Increased delay from 500ms to 700ms
     
     return () => clearTimeout(timer);
   }, [isTranscriptReady]);
