@@ -4,11 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { Upload } from "lucide-react";
+import { Upload, Lock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { v4 as uuidv4 } from "uuid";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useSubscription } from "@/context/SubscriptionContext";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +33,11 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
   const [uploading, setUploading] = useState(false);
   const [customTitle, setCustomTitle] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  
+  // Use our subscription context
+  const { getTierLimits, currentTier, hasFeature } = useSubscription();
+  const maxFileSize = getTierLimits('maxFileSize');
+  const canUseCustomTitles = hasFeature('custom_titles');
   
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -80,6 +87,23 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     
     if (!validAudioTypes.includes(file.type) && !validExtensions.includes(fileExt || '')) {
       toast.error("Please upload a supported audio file format (MP3, MP4, M4A, WAV, WEBM)");
+      return;
+    }
+
+    // Check file size against tier limit
+    if (file.size > maxFileSize) {
+      const sizeMB = Math.round(maxFileSize / (1024 * 1024));
+      toast.error(
+        `File exceeds the ${sizeMB}MB limit for your ${currentTier} plan. Please upgrade for larger files.`,
+        {
+          action: {
+            label: 'Upgrade',
+            onClick: () => {
+              toast("This would navigate to upgrade page");
+            },
+          },
+        }
+      );
       return;
     }
 
@@ -186,6 +210,9 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  // Calculate max size for display
+  const maxSizeMB = Math.round(maxFileSize / (1024 * 1024));
+
   return (
     <>
       <Card className="w-full max-w-2xl mx-auto p-6 shadow-lg">
@@ -205,8 +232,13 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
                 <h3 className="font-semibold text-lg">Drag and drop your audio file</h3>
                 <p className="text-sm text-muted-foreground">Or click to browse files</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Supports MP3, WAV, OGG, and other audio formats
+                  Supports MP3, WAV, OGG, and other audio formats (max {maxSizeMB}MB)
                 </p>
+                <div className="mt-2">
+                  <Badge variant="outline" className="text-xs">
+                    {currentTier.charAt(0).toUpperCase() + currentTier.slice(1)} Plan
+                  </Badge>
+                </div>
               </div>
               <Button
                 type="button"
@@ -296,22 +328,44 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
             </div>
           )}
           
-          <div className="space-y-2">
-            <Label htmlFor="transcript-title" className="text-sm">Transcript Title</Label>
-            <Input
-              id="transcript-title"
-              value={customTitle}
-              onChange={(e) => setCustomTitle(e.target.value)}
-              placeholder="Enter a title for your transcript"
-              className="w-full"
-              disabled={isProcessing || uploading}
-              autoComplete="off"
-              autoFocus
-            />
-            <p className="text-xs text-muted-foreground">
-              This title will be used for the transcript and download file name
-            </p>
-          </div>
+          {canUseCustomTitles ? (
+            <div className="space-y-2">
+              <Label htmlFor="transcript-title" className="text-sm">Transcript Title</Label>
+              <Input
+                id="transcript-title"
+                value={customTitle}
+                onChange={(e) => setCustomTitle(e.target.value)}
+                placeholder="Enter a title for your transcript"
+                className="w-full"
+                disabled={isProcessing || uploading}
+                autoComplete="off"
+                autoFocus
+              />
+              <p className="text-xs text-muted-foreground">
+                This title will be used for the transcript and download file name
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="transcript-title-locked" className="text-sm">Transcript Title</Label>
+                <Badge variant="outline" className="flex items-center gap-1 text-xs">
+                  <Lock className="h-3 w-3" /> Pro Feature
+                </Badge>
+              </div>
+              <Input
+                id="transcript-title-locked"
+                value={selectedFile?.name.split('.').slice(0, -1).join('.') || ""}
+                className="w-full bg-muted cursor-not-allowed"
+                disabled={true}
+                readOnly
+              />
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <Lock className="h-3 w-3" />
+                Custom titles require a Pro plan or higher
+              </p>
+            </div>
+          )}
 
           <DialogFooter className="sm:justify-between">
             <Button 

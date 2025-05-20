@@ -9,6 +9,87 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      features: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: number
+          key: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: number
+          key: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: number
+          key?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      subscription_tiers: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: number
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: number
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: number
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      tier_features: {
+        Row: {
+          feature_id: number
+          tier_id: number
+        }
+        Insert: {
+          feature_id: number
+          tier_id: number
+        }
+        Update: {
+          feature_id?: number
+          tier_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tier_features_feature_id_fkey"
+            columns: ["feature_id"]
+            isOneToOne: false
+            referencedRelation: "features"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tier_features_tier_id_fkey"
+            columns: ["tier_id"]
+            isOneToOne: false
+            referencedRelation: "subscription_tiers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       transcriptions: {
         Row: {
           created_at: string | null
@@ -47,6 +128,44 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      user_subscriptions: {
+        Row: {
+          created_at: string
+          expires_at: string | null
+          id: string
+          is_active: boolean | null
+          tier_id: number
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          tier_id: number
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          tier_id?: number
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_subscriptions_tier_id_fkey"
+            columns: ["tier_id"]
+            isOneToOne: false
+            referencedRelation: "subscription_tiers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

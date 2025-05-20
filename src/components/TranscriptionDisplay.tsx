@@ -4,9 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { Download } from "lucide-react";
+import { Download, Lock } from "lucide-react";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
+import { useSubscription } from "@/context/SubscriptionContext";
+import { Badge } from "@/components/ui/badge";
+import { FeatureGate } from "@/components/FeatureGate";
 
 interface TranscriptionDisplayProps {
   transcript: string;
@@ -51,6 +54,10 @@ const TranscriptionDisplay = ({
   const displayTitle = customTitle || fileName.split('.')[0];
   const formattedTranscript = formatTranscript(transcript);
 
+  // Get subscription information
+  const { getTierLimits, currentTier } = useSubscription();
+  const availableFormats = getTierLimits('exportFormats');
+
   const handleCopy = () => {
     navigator.clipboard.writeText(transcript);
     setCopied(true);
@@ -59,6 +66,19 @@ const TranscriptionDisplay = ({
   };
 
   const handleDownload = (format: 'plain' | 'markdown') => {
+    // Check if format is available in the current tier
+    if (!availableFormats.includes(format)) {
+      toast.error(`${format} export is not available on your ${currentTier} plan.`, {
+        action: {
+          label: 'Upgrade',
+          onClick: () => {
+            toast("This would navigate to upgrade page");
+          },
+        },
+      });
+      return;
+    }
+    
     // Decide which text to download
     const textToDownload = format === 'plain' ? transcript : formattedTranscript;
     const fileExtension = format === 'plain' ? 'txt' : 'md';
@@ -101,12 +121,21 @@ const TranscriptionDisplay = ({
                   >
                     Plain Text (.txt)
                   </button>
-                  <button 
-                    onClick={() => handleDownload('markdown')} 
-                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                  >
-                    Markdown (.md)
-                  </button>
+                  
+                  {availableFormats.includes('markdown') ? (
+                    <button 
+                      onClick={() => handleDownload('markdown')} 
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      Markdown (.md)
+                    </button>
+                  ) : (
+                    <div className="block w-full text-left px-4 py-2 text-sm text-gray-400 bg-gray-50 flex items-center">
+                      <Lock className="w-3 h-3 mr-1" />
+                      Markdown (.md)
+                      <Badge className="ml-1 text-[10px]" variant="outline">Pro+</Badge>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

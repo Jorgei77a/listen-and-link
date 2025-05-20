@@ -7,6 +7,7 @@ import TranscriptionDisplay from "@/components/TranscriptionDisplay";
 import Features from "@/components/Features";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { SubscriptionBadge } from "@/components/SubscriptionBadge";
 
 const Index = () => {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -82,9 +83,12 @@ const Index = () => {
             <h1 className="text-4xl md:text-5xl font-extrabold mb-4 gradient-text">
               Audio to Text in Seconds
             </h1>
-            <p className="text-lg text-muted-foreground">
-              Upload your audio file and get accurate transcription powered by OpenAI's Whisper
-            </p>
+            <div className="flex items-center justify-center gap-2">
+              <p className="text-lg text-muted-foreground">
+                Upload your audio file and get accurate transcription powered by OpenAI's Whisper
+              </p>
+              <SubscriptionBadge />
+            </div>
           </div>
 
           {transcript ? (
