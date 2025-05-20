@@ -61,17 +61,38 @@ const TranscriptionDisplay = ({
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [isEditorReady, setIsEditorReady] = useState(false);
+  const [isTranscriptReady, setIsTranscriptReady] = useState(false);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
+  // Prepare the transcript data once it's available
   useEffect(() => {
-    // Allow a short delay for the editor to initialize properly
+    if (transcript) {
+      // Check if we have a valid transcript
+      console.log("Received transcript with length:", transcript.length);
+      console.log("Received segments count:", segments?.length || 0);
+      
+      // For security: Wait a bit longer for the DOM to be fully ready before loading editor
+      const timer = setTimeout(() => {
+        setIsTranscriptReady(true);
+      }, 300);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [transcript, segments]);
+  
+  // Allow a short delay for the editor to initialize properly
+  useEffect(() => {
+    if (!isTranscriptReady) return;
+    
     const timer = setTimeout(() => {
       setIsEditorReady(true);
-    }, 100);
+      console.log("Editor initialization ready flag set to true");
+    }, 500);
     
     return () => clearTimeout(timer);
-  }, []);
+  }, [isTranscriptReady]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(transcript);
@@ -81,8 +102,8 @@ const TranscriptionDisplay = ({
   };
 
   const handleEditorMount = (editorInstance: LexicalEditorType) => {
+    console.log("Editor instance mounted and ready");
     setEditor(editorInstance);
-    console.log("Editor mounted successfully");
   };
 
   const handleEditorChange = (editorState: EditorState) => {
@@ -104,6 +125,15 @@ const TranscriptionDisplay = ({
 
   // Format audio duration as a user-friendly string
   const formattedDuration = audioDuration !== null ? formatAudioDuration(audioDuration) : null;
+  
+  // Monitor editor container
+  useEffect(() => {
+    if (isEditorReady && editorContainerRef.current) {
+      console.log("Editor container dimensions:", 
+        editorContainerRef.current.clientWidth, 
+        editorContainerRef.current.clientHeight);
+    }
+  }, [isEditorReady]);
 
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-lg">
@@ -150,17 +180,31 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
-        {/* Lexical Editor */}
-        {isEditorReady && (
-          <LexicalEditor 
-            initialText={transcript}
-            segments={segments}
-            className="mb-4"
-            onEditorMount={handleEditorMount}
-            onEditorChange={handleEditorChange}
-            currentTimeInSeconds={currentTime}
-          />
-        )}
+        {/* Lexical Editor with container ref for monitoring */}
+        <div ref={editorContainerRef}>
+          {isEditorReady && isTranscriptReady ? (
+            <LexicalEditor 
+              initialText={transcript}
+              segments={segments}
+              className="mb-4"
+              onEditorMount={handleEditorMount}
+              onEditorChange={handleEditorChange}
+              currentTimeInSeconds={currentTime}
+            />
+          ) : (
+            <div className="mb-4 border rounded-md">
+              <div className="bg-muted/30 min-h-[200px] p-4 rounded-md">
+                <div className="space-y-2">
+                  <div className="h-4 bg-muted/50 rounded w-3/4 animate-pulse" />
+                  <div className="h-4 bg-muted/50 rounded w-full animate-pulse" />
+                  <div className="h-4 bg-muted/50 rounded w-5/6 animate-pulse" />
+                  <div className="h-4 bg-muted/50 rounded w-4/5 animate-pulse" />
+                  <div className="h-4 bg-muted/50 rounded w-2/3 animate-pulse" />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
         
         {/* Audio Player */}
         {audioUrl && (

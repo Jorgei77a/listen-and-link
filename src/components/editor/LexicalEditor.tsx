@@ -16,11 +16,15 @@ import {
   LexicalEditor as LexicalEditorType,
   ParagraphNode,
   LexicalNode,
-  $getSelection
+  $getSelection,
+  COMMAND_PRIORITY_HIGH,
+  INITIALIZED_COMMAND,
+  COMMAND_PRIORITY_CRITICAL
 } from "lexical";
 import { cn } from "@/lib/utils";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
 
 interface LexicalEditorProps {
   initialText: string;
@@ -80,9 +84,11 @@ export function LexicalEditor({
   currentTimeInSeconds,
 }: LexicalEditorProps) {
   const editorRef = useRef<LexicalEditorType | null>(null);
-  const [isContentLoaded, setIsContentLoaded] = useState(false);
+  const [isEditorMounted, setIsEditorMounted] = useState(false);
+  const [isContentPopulated, setIsContentPopulated] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const contentEditableRef = useRef<HTMLDivElement | null>(null);
+  const initAttempts = useRef(0);
   
   const initialConfig = {
     namespace: "TranscriptEditor",
@@ -105,24 +111,151 @@ export function LexicalEditor({
       },
     },
     onError: (error: Error) => {
-      console.error(error);
+      console.error("Lexical editor error:", error);
+      toast.error("Editor error: " + error.message);
     },
     editable: !readOnly,
     nodes: [ListNode, ListItemNode],
   };
 
-  // Cleanup timeout on unmount
+  // Cleanup function for timeouts
   useEffect(() => {
+    const timeouts: NodeJS.Timeout[] = [];
+    
+    const registerTimeout = (callback: () => void, delay: number) => {
+      const id = setTimeout(callback, delay);
+      timeouts.push(id);
+      return id;
+    };
+    
     return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
+      timeouts.forEach(id => clearTimeout(id));
     };
   }, []);
 
-  // Highlight the paragraph that matches the current audio time
+  // Register listener for editor initialization
+  const registerEditorListener = (editor: LexicalEditorType) => {
+    editorRef.current = editor;
+    
+    // Register an editor listener for initialization
+    editor.registerCommand(
+      INITIALIZED_COMMAND,
+      () => {
+        console.log("INITIALIZED_COMMAND fired");
+        setIsEditorMounted(true);
+        
+        // Call onEditorMount callback if provided
+        if (onEditorMount) {
+          onEditorMount(editor);
+        }
+        
+        return false;
+      },
+      COMMAND_PRIORITY_CRITICAL
+    );
+  };
+
+  // Populate editor with content after initialization
   useEffect(() => {
-    if (!currentTimeInSeconds || !editorRef.current) return;
+    if (!editorRef.current || !isEditorMounted) {
+      return;
+    }
+
+    console.log("Editor mounted, populating content now...");
+
+    try {
+      // Populate the editor with initial content
+      editorRef.current.update(() => {
+        const root = $getRoot();
+        
+        // Clear any existing content first
+        root.clear();
+        
+        // Create segments from the initial text
+        const textSegments = createTextSegments(initialText, segments);
+        console.log(`Creating ${textSegments.length} text segments`);
+        
+        // Create paragraph nodes for each segment
+        textSegments.forEach((segment) => {
+          const paragraphNode = $createParagraphNode();
+          
+          // Add timestamp data if available
+          if (segment.start !== undefined && segment.end !== undefined) {
+            (paragraphNode as ParagraphNode).timestampData = {
+              start: segment.start.toString(),
+              end: segment.end.toString()
+            };
+          }
+          
+          const textNode = $createTextNode(segment.text);
+          paragraphNode.append(textNode);
+          root.append(paragraphNode);
+        });
+      });
+
+      // Mark content as populated
+      setIsContentPopulated(true);
+      
+      // Force a repaint after a short delay
+      setTimeout(() => {
+        if (editorRef.current) {
+          editorRef.current.update(() => {
+            // This empty update forces a re-render
+          });
+          
+          // Hide the loading state
+          setIsInitializing(false);
+        }
+      }, 150);
+    } catch (error) {
+      console.error("Error populating editor:", error);
+      // Even if there's an error, hide the loading state
+      setIsInitializing(false);
+    }
+  }, [initialText, segments, isEditorMounted]);
+
+  // Apply timestamp data attributes after content is populated
+  useEffect(() => {
+    if (!editorRef.current || !isContentPopulated) {
+      return;
+    }
+    
+    console.log("Content populated, applying timestamps...");
+    
+    try {
+      editorRef.current.update(() => {
+        const root = $getRoot();
+        const paragraphs = root.getChildren();
+        
+        paragraphs.forEach((paragraph: LexicalNode) => {
+          if ((paragraph as any).timestampData) {
+            const element = editorRef.current?.getElementByKey(paragraph.getKey());
+            if (element) {
+              element.setAttribute('data-start', (paragraph as any).timestampData.start);
+              element.setAttribute('data-end', (paragraph as any).timestampData.end);
+              console.log(`Set timestamp data for paragraph: ${(paragraph as any).timestampData.start} - ${(paragraph as any).timestampData.end}`);
+            }
+          }
+        });
+      });
+      
+      // Force visibility check after timestamps are applied
+      setTimeout(() => {
+        const editorElement = document.querySelector('.LexicalEditor-root');
+        if (editorElement) {
+          console.log("Editor element found:", editorElement);
+          const paragraphs = editorElement.querySelectorAll('p');
+          console.log(`Found ${paragraphs.length} paragraphs in DOM`);
+        }
+      }, 200);
+    } catch (error) {
+      console.error("Error applying timestamp attributes:", error);
+    }
+  }, [isContentPopulated]);
+
+  // Handle highlighting based on current time
+  useEffect(() => {
+    if (!currentTimeInSeconds || !editorRef.current || !isContentPopulated) return;
     
     editorRef.current.update(() => {
       const root = $getRoot();
@@ -151,171 +284,115 @@ export function LexicalEditor({
         }
       });
     });
-  }, [currentTimeInSeconds]);
-  
-  // Mount the editor and populate it with the initial text
+  }, [currentTimeInSeconds, isContentPopulated]);
+
+  // Fallback initialization in case the editor doesn't initialize properly
   useEffect(() => {
-    if (!editorRef.current) return;
+    if (isContentPopulated || !isEditorMounted || !editorRef.current) return;
     
-    // Store the editor reference for other components to use
-    if (onEditorMount) {
-      onEditorMount(editorRef.current);
-    }
-    
-    setIsInitializing(true);
-    
-    // Populate the editor with initial content
-    editorRef.current.update(() => {
-      const root = $getRoot();
-      // Clear any existing content
-      root.clear();
+    const retryInterval = setTimeout(() => {
+      initAttempts.current += 1;
+      console.log(`Retry attempt ${initAttempts.current} to populate content...`);
       
-      // Split the text into segments
-      const textSegments = createTextSegments(initialText, segments);
+      if (initAttempts.current > 3) {
+        console.error("Failed to initialize editor after multiple attempts");
+        setIsInitializing(false);
+        return;
+      }
       
-      // Create paragraph nodes for each segment
-      textSegments.forEach((segment) => {
-        const paragraphNode = $createParagraphNode();
-        
-        // Add timestamp data if available
-        if (segment.start !== undefined && segment.end !== undefined) {
-          // Store timestamp data on the node using a custom property
-          (paragraphNode as ParagraphNode).timestampData = {
-            start: segment.start.toString(),
-            end: segment.end.toString()
-          };
-        }
-        
-        const textNode = $createTextNode(segment.text);
-        paragraphNode.append(textNode);
-        root.append(paragraphNode);
-      });
-    });
-    
-    // Clear any existing timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    
-    // Force editor update and fix visibility after a short delay
-    timeoutRef.current = setTimeout(() => {
+      // Try to force a re-render
       if (editorRef.current) {
         try {
-          // Force a repaint by reading the editor state
-          editorRef.current.getEditorState().read(() => {
-            // This ensures the editor state is processed
-            const root = $getRoot();
-            const hasContent = root.getChildrenSize() > 0;
-            console.log("Editor content loaded:", hasContent, "with", root.getChildrenSize(), "paragraphs");
-          });
-          
-          // Apply focus to the editor to ensure content renders
-          editorRef.current.focus();
-          
-          // Now blur it so it doesn't stay focused unnecessarily
-          editorRef.current.blur();
-          
-          // Mark content as loaded and hide skeletons
-          setIsContentLoaded(true);
-          setIsInitializing(false);
-          
-          console.log("Editor initialization completed");
-        } catch (error) {
-          console.error("Error during editor initialization:", error);
-          // Even if there's an error, we should still hide the loading state
-          setIsInitializing(false);
-        }
-      }
-    }, 300); // Slightly longer delay to ensure DOM is ready
-    
-  }, [initialText, segments, onEditorMount]);
-
-  // Apply timestamp data attributes to DOM elements after content is loaded
-  useEffect(() => {
-    if (isContentLoaded && editorRef.current) {
-      console.log("Applying timestamp data attributes to paragraphs");
-      
-      editorRef.current.update(() => {
-        const root = $getRoot();
-        const paragraphs = root.getChildren();
-        
-        paragraphs.forEach((paragraph: LexicalNode) => {
-          if ((paragraph as any).timestampData) {
-            const element = editorRef.current?.getElementByKey(paragraph.getKey());
-            if (element) {
-              element.setAttribute('data-start', (paragraph as any).timestampData.start);
-              element.setAttribute('data-end', (paragraph as any).timestampData.end);
-            }
-          }
-        });
-      });
-      
-      // Additional force update to ensure all content is visible
-      // This helps with certain edge cases where content might not appear
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      
-      timeoutRef.current = setTimeout(() => {
-        if (editorRef.current) {
-          // Force a final re-render of the editor
           editorRef.current.update(() => {
-            // No changes needed, just triggering an update
+            const root = $getRoot();
+            if (root.getChildrenSize() === 0) {
+              // Try to re-populate content if empty
+              const textSegments = createTextSegments(initialText, segments);
+              textSegments.forEach((segment) => {
+                const paragraphNode = $createParagraphNode();
+                const textNode = $createTextNode(segment.text);
+                paragraphNode.append(textNode);
+                root.append(paragraphNode);
+              });
+              console.log("Forced content population during retry");
+            }
           });
+          
+          // Set content populated flag
+          setIsContentPopulated(true);
+          
+          // Force-hide loading state after retry
+          setTimeout(() => {
+            setIsInitializing(false);
+          }, 200);
+        } catch (error) {
+          console.error("Error during retry:", error);
+          setIsInitializing(false);
         }
-      }, 100);
-    }
-  }, [isContentLoaded]);
+      }
+    }, 1000);
+    
+    return () => clearTimeout(retryInterval);
+  }, [isEditorMounted, isContentPopulated, initialText, segments]);
 
   return (
     <div className={cn("border rounded-md", className)}>
       <LexicalComposer initialConfig={initialConfig}>
-        <EditorToolbar />
-        <div className="relative bg-muted/30 rounded-md">
-          {isInitializing ? (
-            <div className="min-h-[200px] max-h-[400px] p-4">
-              <Skeleton className="h-4 w-3/4 mb-2" />
-              <Skeleton className="h-4 w-full mb-2" />
-              <Skeleton className="h-4 w-5/6 mb-2" />
-              <Skeleton className="h-4 w-4/5 mb-2" />
-              <Skeleton className="h-4 w-2/3" />
-            </div>
-          ) : (
-            <RichTextPlugin
-              contentEditable={
-                <ContentEditable className="min-h-[200px] max-h-[400px] overflow-y-auto p-4 outline-none" />
-              }
-              placeholder={<div className="absolute top-[15px] left-[15px] text-muted-foreground">Start editing...</div>}
-              ErrorBoundary={LexicalErrorBoundary}
-            />
-          )}
-        </div>
-        <HistoryPlugin />
-        <ListPlugin />
-        <OnChangePlugin
-          onChange={(editorState, editor) => {
-            editorRef.current = editor;
-            if (onEditorChange) {
-              onEditorChange(editorState);
-            }
-            
-            // Apply timestamp data attributes to DOM
-            editor.update(() => {
-              const root = $getRoot();
-              const paragraphs = root.getChildren();
-              
-              paragraphs.forEach((paragraph: LexicalNode) => {
-                if ((paragraph as any).timestampData) {
-                  const element = editor.getElementByKey(paragraph.getKey());
-                  if (element) {
-                    element.setAttribute('data-start', (paragraph as any).timestampData.start);
-                    element.setAttribute('data-end', (paragraph as any).timestampData.end);
-                  }
+        <div className="LexicalEditor-root">
+          <EditorToolbar />
+          <div className="relative bg-muted/30 rounded-md">
+            {isInitializing ? (
+              <div className="min-h-[200px] max-h-[400px] p-4">
+                <Skeleton className="h-4 w-3/4 mb-2" />
+                <Skeleton className="h-4 w-full mb-2" />
+                <Skeleton className="h-4 w-5/6 mb-2" />
+                <Skeleton className="h-4 w-4/5 mb-2" />
+                <Skeleton className="h-4 w-2/3" />
+              </div>
+            ) : (
+              <RichTextPlugin
+                contentEditable={
+                  <ContentEditable 
+                    ref={contentEditableRef}
+                    className="min-h-[200px] max-h-[400px] overflow-y-auto p-4 outline-none" 
+                  />
                 }
+                placeholder={<div className="absolute top-[15px] left-[15px] text-muted-foreground">Start editing...</div>}
+                ErrorBoundary={LexicalErrorBoundary}
+              />
+            )}
+          </div>
+          <HistoryPlugin />
+          <ListPlugin />
+          <OnChangePlugin
+            onChange={(editorState, editor) => {
+              if (!editorRef.current) {
+                editorRef.current = editor;
+                registerEditorListener(editor);
+              }
+              
+              if (onEditorChange) {
+                onEditorChange(editorState);
+              }
+              
+              // Apply timestamp data attributes to DOM
+              editor.update(() => {
+                const root = $getRoot();
+                const paragraphs = root.getChildren();
+                
+                paragraphs.forEach((paragraph: LexicalNode) => {
+                  if ((paragraph as any).timestampData) {
+                    const element = editor.getElementByKey(paragraph.getKey());
+                    if (element) {
+                      element.setAttribute('data-start', (paragraph as any).timestampData.start);
+                      element.setAttribute('data-end', (paragraph as any).timestampData.end);
+                    }
+                  }
+                });
               });
-            });
-          }}
-        />
+            }}
+          />
+        </div>
       </LexicalComposer>
     </div>
   );
