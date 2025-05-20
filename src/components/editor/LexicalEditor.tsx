@@ -1,5 +1,4 @@
-
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
@@ -7,6 +6,7 @@ import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { ListItemNode, ListNode } from "@lexical/list";
 import LexicalErrorBoundary from "@lexical/react/LexicalErrorBoundary";
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { EditorToolbar } from "./EditorToolbar";
 import { 
   $getRoot, 
@@ -15,7 +15,8 @@ import {
   EditorState, 
   LexicalEditor as LexicalEditorType,
   ParagraphNode,
-  LexicalNode 
+  LexicalNode,
+  $isRootNode
 } from "lexical";
 import { cn } from "@/lib/utils";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
@@ -68,6 +69,129 @@ function createTextSegments(text: string, segments?: LexicalEditorProps['segment
     .map(sentence => ({ text: sentence.trim() }));
 }
 
+// This component initializes content after the editor has mounted
+function InitializeContent({
+  initialText,
+  segments,
+  onReady
+}: {
+  initialText: string;
+  segments?: LexicalEditorProps['segments'];
+  onReady?: () => void;
+}) {
+  const [editor] = useLexicalComposerContext();
+  const [isInitialized, setIsInitialized] = useState(false);
+  
+  useEffect(() => {
+    if (isInitialized) return;
+    
+    // Small delay to ensure the editor is fully mounted
+    const timer = setTimeout(() => {
+      if (!editor) return;
+      
+      try {
+        editor.update(() => {
+          const root = $getRoot();
+          if (!$isRootNode(root)) return;
+          
+          // Clear any existing content
+          root.clear();
+          
+          // Split the text into segments
+          const textSegments = createTextSegments(initialText, segments);
+          
+          // Create paragraph nodes for each segment
+          textSegments.forEach((segment) => {
+            const paragraphNode = $createParagraphNode();
+            
+            // Add timestamp data if available
+            if (segment.start !== undefined && segment.end !== undefined) {
+              // Store timestamp data on the node using a custom property
+              (paragraphNode as ParagraphNode).timestampData = {
+                start: segment.start.toString(),
+                end: segment.end.toString()
+              };
+            }
+            
+            const textNode = $createTextNode(segment.text);
+            paragraphNode.append(textNode);
+            root.append(paragraphNode);
+          });
+        });
+        
+        // Apply timestamp attributes to DOM
+        setTimeout(() => {
+          editor.getEditorState().read(() => {
+            const root = $getRoot();
+            const paragraphs = root.getChildren();
+            
+            paragraphs.forEach((paragraph) => {
+              const timestampData = (paragraph as any).timestampData;
+              if (timestampData) {
+                const element = editor.getElementByKey(paragraph.getKey());
+                if (element) {
+                  element.setAttribute('data-start', timestampData.start);
+                  element.setAttribute('data-end', timestampData.end);
+                }
+              }
+            });
+          });
+          
+          // Finally set as initialized and notify parent
+          setIsInitialized(true);
+          if (onReady) onReady();
+        }, 50);
+      } catch (error) {
+        console.error("Error initializing Lexical editor content:", error);
+        setIsInitialized(true); // Mark as initialized even on error to prevent retries
+      }
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, [editor, initialText, segments, isInitialized, onReady]);
+  
+  return null;
+}
+
+// Component to handle timestamp highlighting based on current audio time
+function TimestampHighlighter({ currentTimeInSeconds }: { currentTimeInSeconds?: number | null }) {
+  const [editor] = useLexicalComposerContext();
+  
+  useEffect(() => {
+    if (!currentTimeInSeconds || !editor) return;
+    
+    editor.update(() => {
+      const root = $getRoot();
+      const paragraphs = root.getChildren();
+      
+      paragraphs.forEach((paragraph) => {
+        const element = editor.getElementByKey(paragraph.getKey());
+        if (!element) return;
+        
+        // Check if this paragraph has timestamp data attributes
+        const start = parseFloat(element.getAttribute('data-start') || '0');
+        const end = parseFloat(element.getAttribute('data-end') || '0');
+        
+        if (start <= currentTimeInSeconds && currentTimeInSeconds <= end) {
+          element.classList.add('bg-primary/10', 'transition-colors');
+          
+          // Scroll into view if needed
+          const rect = element.getBoundingClientRect();
+          const parentRect = element.parentElement?.getBoundingClientRect();
+          
+          if (parentRect && (rect.bottom > parentRect.bottom || rect.top < parentRect.top)) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        } else {
+          element.classList.remove('bg-primary/10');
+        }
+      });
+    });
+  }, [currentTimeInSeconds, editor]);
+  
+  return null;
+}
+
 export function LexicalEditor({
   initialText,
   segments,
@@ -77,7 +201,8 @@ export function LexicalEditor({
   onEditorChange,
   currentTimeInSeconds,
 }: LexicalEditorProps) {
-  const editorRef = useRef<LexicalEditorType | null>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
+  const [isContentReady, setIsContentReady] = useState(false);
   
   const initialConfig = {
     namespace: "TranscriptEditor",
@@ -100,88 +225,22 @@ export function LexicalEditor({
       },
     },
     onError: (error: Error) => {
-      console.error(error);
+      console.error("Lexical Editor Error:", error);
     },
     editable: !readOnly,
-    // Register the list nodes
     nodes: [ListNode, ListItemNode],
   };
 
-  // Highlight the paragraph that matches the current audio time
-  useEffect(() => {
-    if (!currentTimeInSeconds || !editorRef.current) return;
-    
-    editorRef.current.update(() => {
-      const root = $getRoot();
-      const paragraphs = root.getChildren();
-      
-      paragraphs.forEach((paragraph) => {
-        const element = editorRef.current?.getElementByKey(paragraph.getKey());
-        if (!element) return;
-        
-        // Check if this paragraph has timestamp data attributes
-        const start = parseFloat(element.getAttribute('data-start') || '0');
-        const end = parseFloat(element.getAttribute('data-end') || '0');
-        
-        if (start <= currentTimeInSeconds && currentTimeInSeconds <= end) {
-          element.classList.add('bg-primary/10', 'transition-colors');
-          
-          // Scroll into view if needed
-          const rect = element.getBoundingClientRect();
-          const parentRect = element.parentElement?.getBoundingClientRect();
-          
-          if (parentRect && (rect.bottom > parentRect.bottom || rect.top < parentRect.top)) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        } else {
-          element.classList.remove('bg-primary/10');
-        }
-      });
-    });
-  }, [currentTimeInSeconds]);
-  
-  // Mount the editor and populate it with the initial text
-  useEffect(() => {
-    if (!editorRef.current) return;
-    
-    // Store the editor reference for other components to use
-    if (onEditorMount) {
-      onEditorMount(editorRef.current);
-    }
-    
-    editorRef.current.update(() => {
-      const root = $getRoot();
-      // Clear any existing content
-      root.clear();
-      
-      // Split the text into segments
-      const textSegments = createTextSegments(initialText, segments);
-      
-      // Create paragraph nodes for each segment
-      textSegments.forEach((segment) => {
-        const paragraphNode = $createParagraphNode();
-        
-        // Add timestamp data if available
-        if (segment.start !== undefined && segment.end !== undefined) {
-          // Store timestamp data on the node using a custom property
-          (paragraphNode as ParagraphNode).timestampData = {
-            start: segment.start.toString(),
-            end: segment.end.toString()
-          };
-        }
-        
-        const textNode = $createTextNode(segment.text);
-        paragraphNode.append(textNode);
-        root.append(paragraphNode);
-      });
-    });
-  }, [initialText, segments, onEditorMount]);
-
   return (
-    <div className={cn("border rounded-md", className)}>
+    <div className={cn("border rounded-md", className)} ref={editorContainerRef}>
       <LexicalComposer initialConfig={initialConfig}>
         <EditorToolbar />
         <div className="relative bg-muted/30 rounded-md">
+          {!isContentReady && (
+            <div className="absolute inset-0 flex items-center justify-center bg-muted/20 z-10 rounded-md">
+              <div className="animate-pulse bg-muted rounded-md w-full h-[200px] opacity-30"></div>
+            </div>
+          )}
           <RichTextPlugin
             contentEditable={
               <ContentEditable className="min-h-[200px] max-h-[400px] overflow-y-auto p-4 outline-none" />
@@ -192,28 +251,30 @@ export function LexicalEditor({
         </div>
         <HistoryPlugin />
         <ListPlugin />
+        
+        {/* Initialize content after editor is mounted */}
+        <InitializeContent 
+          initialText={initialText} 
+          segments={segments} 
+          onReady={() => {
+            setIsContentReady(true);
+          }}
+        />
+        
+        {/* Handle timestamp highlighting */}
+        {currentTimeInSeconds !== undefined && (
+          <TimestampHighlighter currentTimeInSeconds={currentTimeInSeconds} />
+        )}
+        
         <OnChangePlugin
           onChange={(editorState, editor) => {
-            editorRef.current = editor;
+            if (onEditorMount && editor) {
+              onEditorMount(editor);
+            }
+            
             if (onEditorChange) {
               onEditorChange(editorState);
             }
-            
-            // Apply timestamp data attributes to DOM
-            editor.update(() => {
-              const root = $getRoot();
-              const paragraphs = root.getChildren();
-              
-              paragraphs.forEach((paragraph: LexicalNode) => {
-                if ((paragraph as any).timestampData) {
-                  const element = editor.getElementByKey(paragraph.getKey());
-                  if (element) {
-                    element.setAttribute('data-start', (paragraph as any).timestampData.start);
-                    element.setAttribute('data-end', (paragraph as any).timestampData.end);
-                  }
-                }
-              });
-            });
           }}
         />
       </LexicalComposer>

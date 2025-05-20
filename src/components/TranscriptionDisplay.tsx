@@ -60,6 +60,7 @@ const TranscriptionDisplay = ({
   const [copied, setCopied] = useState(false);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
+  const [editorReady, setEditorReady] = useState(false);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
@@ -71,7 +72,9 @@ const TranscriptionDisplay = ({
   };
 
   const handleEditorMount = (editorInstance: LexicalEditorType) => {
+    console.log("Editor mounted successfully");
     setEditor(editorInstance);
+    setEditorReady(true);
   };
 
   const handleEditorChange = (editorState: EditorState) => {
