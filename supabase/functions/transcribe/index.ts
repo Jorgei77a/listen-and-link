@@ -1,541 +1,225 @@
-
-import "https://deno.land/x/xhr@0.1.0/mod.ts";
+// Import necessary modules
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.6";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 
+// Constants for CORS headers
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// OpenAI Whisper API size limit (25MB in bytes)
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
+// Required OpenAI API key
+const openAiKey = Deno.env.get('OPENAI_API_KEY');
 
-// Supported audio formats by Whisper API
-const SUPPORTED_FORMATS = ['mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'wav', 'webm'];
+// Create Supabase client
+const supabaseUrl = Deno.env.get('SUPABASE_URL');
+const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
+// Configure the service
 serve(async (req) => {
-  // Handle CORS preflight requests
+  // CORS handling
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const { filePath, fileName, fileSize, customTitle } = await req.json();
-    
-    if (!filePath || !fileName) {
-      throw new Error('File path and name are required');
+    // Security check: If no OpenAI key, return error
+    if (!openAiKey) {
+      return new Response(
+        JSON.stringify({ error: 'OpenAI API key not configured' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
-    
-    // Create a Supabase client
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    
-    // Verify file format is supported
-    const fileExt = fileName.split('.').pop()?.toLowerCase();
-    if (!fileExt || !SUPPORTED_FORMATS.includes(fileExt)) {
-      throw new Error(`Unsupported file format: ${fileExt}. Supported formats: ${SUPPORTED_FORMATS.join(', ')}`);
+
+    // Security check: If no admin key, return error
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return new Response(
+        JSON.stringify({ error: 'Supabase credentials not configured' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
-    
-    // Create a transcription record
-    const { data: transcription, error: insertError } = await supabase
+
+    // Create Supabase admin client
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Parse the request body
+    const payload = await req.json();
+    const { filePath, fileName, fileSize, customTitle, estimatedDuration } = payload;
+
+    // Validate required fields
+    if (!filePath || !fileName || !fileSize) {
+      return new Response(
+        JSON.stringify({ error: 'Missing required fields' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Create a transcription record in the database
+    const { data: transcription, error: transcriptionError } = await supabase
       .from('transcriptions')
       .insert({
-        file_name: fileName,
         file_path: filePath,
+        file_name: fileName,
         file_size: fileSize,
+        custom_title: customTitle || fileName.split('.')[0],
         status: 'processing',
-        custom_title: customTitle || fileName.split('.')[0]
+        progress_message: 'Starting transcription...',
+        // Store estimated duration until we get the real one
+        audio_duration: estimatedDuration || null
       })
       .select()
       .single();
-      
-    if (insertError) {
-      throw new Error(`Failed to create transcription record: ${insertError.message}`);
+
+    if (transcriptionError) {
+      console.error('Error creating transcription record:', transcriptionError);
+      return new Response(
+        JSON.stringify({ error: 'Failed to create transcription record' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    // Start background processing
+    // Start the transcription process in the background
     const transcriptionId = transcription.id;
     
-    // Use Deno's backgroundFetch for async processing
-    if (typeof EdgeRuntime !== 'undefined') {
-      console.log('Starting background processing for transcription:', transcriptionId);
-      
-      // Start background processing task
-      EdgeRuntime.waitUntil(
-        (async () => {
-          try {
-            await processTranscription(supabase, transcriptionId, filePath, fileName, fileSize);
-            console.log('Background processing completed successfully for:', transcriptionId);
-          } catch (error) {
-            console.error('Background processing failed:', error);
-            await updateTranscriptionStatus(
-              supabase,
-              transcriptionId,
-              'failed',
-              null,
-              `Processing error: ${error.message}`
-            );
-          }
-        })()
-      );
-    } else {
-      // Fallback for environments without EdgeRuntime
-      setTimeout(() => {
-        processTranscription(supabase, transcriptionId, filePath, fileName, fileSize)
-          .catch(error => {
-            console.error('Processing error:', error);
-            updateTranscriptionStatus(
-              supabase,
-              transcriptionId,
-              'failed',
-              null,
-              `Processing error: ${error.message}`
-            );
-          });
-      }, 0);
-    }
-    
-    // Return immediate response
+    // This will not block the response, it's a background task
+    EdgeRuntime.waitUntil(processTranscription(
+      transcriptionId, 
+      filePath, 
+      supabase, 
+      openAiKey
+    ));
+
+    // Return the transcription ID immediately
     return new Response(
       JSON.stringify({ 
         id: transcriptionId,
-        message: 'Transcription processing started in background'
+        message: 'Transcription job started', 
+        status: 'processing' 
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
+
   } catch (error) {
-    console.error('Initial request error:', error);
-    
+    console.error('Transcription error:', error);
     return new Response(
-      JSON.stringify({ error: error.message }),
-      { 
-        status: 500, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      }
+      JSON.stringify({ error: error.message || 'Internal server error' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
 
-// Main processing function that runs in the background
+/**
+ * Process a transcription in the background
+ */
 async function processTranscription(
-  supabase: any,
-  transcriptionId: string,
-  filePath: string,
-  fileName: string,
-  fileSize: number
-): Promise<void> {
+  transcriptionId: string, 
+  filePath: string, 
+  supabase: any, 
+  openAiKey: string
+) {
   try {
-    console.log(`Starting transcription processing for ${fileName} (${fileSize} bytes)`);
-    
-    // Download the file from Supabase storage
-    const { data: fileData, error: downloadError } = await supabase
-      .storage
+    // Update record to show we're starting to process
+    await supabase
+      .from('transcriptions')
+      .update({ 
+        progress_message: 'Downloading audio file...',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', transcriptionId);
+
+    // Download the audio file from storage
+    const { data: fileData, error: fileError } = await supabase.storage
       .from('audio_files')
       .download(filePath);
-      
-    if (downloadError || !fileData) {
-      await updateTranscriptionStatus(
-        supabase, 
-        transcriptionId, 
-        'failed', 
-        null, 
-        `Failed to download file: ${downloadError?.message}`
-      );
-      throw new Error(`Failed to download file: ${downloadError?.message}`);
+
+    if (fileError) {
+      throw new Error(`Failed to download audio file: ${fileError.message}`);
+    }
+
+    // Update progress
+    await supabase
+      .from('transcriptions')
+      .update({ 
+        progress_message: 'Preparing audio for transcription...',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', transcriptionId);
+
+    // Create form data for the OpenAI API request
+    const formData = new FormData();
+    formData.append('file', fileData);
+    formData.append('model', 'whisper-1');
+    formData.append('response_format', 'json');
+
+    // Update progress
+    await supabase
+      .from('transcriptions')
+      .update({ 
+        progress_message: 'Sending to OpenAI for transcription...',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', transcriptionId);
+
+    // Call the OpenAI API to transcribe the audio
+    const openAiResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openAiKey}`,
+      },
+      body: formData,
+    });
+
+    // If the OpenAI API returns an error
+    if (!openAiResponse.ok) {
+      const errorData = await openAiResponse.text();
+      throw new Error(`OpenAI API error: ${errorData}`);
+    }
+
+    // Parse the OpenAI API response
+    const openAiData = await openAiResponse.json();
+    const transcript = openAiData.text;
+
+    // Some transcription services return metadata like duration
+    // If OpenAI Whisper returns duration (it currently doesn't directly), we can use it
+    // For now we'll calculate it from segments or use other means
+    let audioDuration = null;
+    
+    // If OpenAI returns audio segments with timestamps, we can estimate duration
+    if (openAiData.segments && openAiData.segments.length > 0) {
+      const lastSegment = openAiData.segments[openAiData.segments.length - 1];
+      audioDuration = Math.ceil(lastSegment.end);
+    } else if (openAiData.duration) {
+      // If OpenAI someday directly returns duration
+      audioDuration = Math.ceil(openAiData.duration);
     }
     
-    // Update status to show download complete
-    await updateTranscriptionProgress(
-      supabase,
-      transcriptionId,
-      'processing',
-      'File downloaded, starting transcription'
-    );
-    
-    // Process file based on size
-    let transcript = '';
-    let audioDuration = 0; // To store the detected duration in seconds
-    
-    if (fileData.size <= MAX_FILE_SIZE) {
-      // Process small file normally
-      const result = await processAudioChunk(fileData, fileName);
-      transcript = result.text;
-      audioDuration = result.duration || 0;
-      
-      // Update status to show transcription is done
-      await updateTranscriptionProgress(
-        supabase,
-        transcriptionId,
-        'processing',
-        'Transcription complete, finalizing'
-      );
-    } else {
-      // Large file needs intelligent chunking
-      const result = await processLargeFile(supabase, transcriptionId, fileData, fileName);
-      transcript = result.text;
-      audioDuration = result.duration || 0;
-    }
-    
-    // Update transcription with result and audio duration
-    await updateTranscriptionStatus(
-      supabase, 
-      transcriptionId, 
-      'completed', 
-      transcript, 
-      null, 
-      audioDuration
-    );
-    
-    console.log(`Transcription completed successfully for ${fileName}, duration: ${audioDuration} seconds`);
-    
-    // Update user's monthly usage with the audio duration
-    try {
-      const { data: transcriptionData } = await supabase
-        .from('transcriptions')
-        .select('id')
-        .eq('id', transcriptionId)
-        .single();
-        
-      if (transcriptionData) {
-        // Audio duration is now tracked in the transcriptions table
-        console.log(`Audio duration for ${transcriptionId}: ${audioDuration} seconds`);
-      }
-    } catch (error) {
-      console.error('Error updating user usage:', error);
-    }
-    
+    // If we couldn't get duration from OpenAI, we'll keep the estimated duration
+    // that was provided when the transcription was created
+
+    // Update the transcription record with the transcript text, status, and actual duration if available
+    await supabase
+      .from('transcriptions')
+      .update({ 
+        transcript: transcript,
+        status: 'completed',
+        audio_duration: audioDuration || transcription.audio_duration, // Use actual duration if available
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', transcriptionId);
+
+    console.log(`Transcription ${transcriptionId} completed successfully.`);
+
   } catch (error) {
-    console.error(`Transcription processing error for ${fileName}:`, error);
-    await updateTranscriptionStatus(
-      supabase, 
-      transcriptionId, 
-      'failed', 
-      null, 
-      `Processing error: ${error.message}`
-    );
-    throw error;
-  }
-}
-
-// Process a single audio chunk with Whisper API
-async function processAudioChunk(audioData: Blob, fileName: string): Promise<{text: string, duration?: number}> {
-  console.log(`Processing audio chunk: ${fileName}, size: ${audioData.size} bytes`);
-  
-  const formData = new FormData();
-  formData.append('file', audioData, fileName);
-  formData.append('model', 'whisper-1');
-  formData.append('response_format', 'verbose_json'); // Request detailed response including duration
-  
-  const openaiResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
-    },
-    body: formData,
-  });
-  
-  if (!openaiResponse.ok) {
-    const errorData = await openaiResponse.text();
-    console.error(`OpenAI API error for ${fileName}:`, errorData);
-    throw new Error(`OpenAI API error: ${errorData}`);
-  }
-  
-  const result = await openaiResponse.json();
-  
-  // Extract audio duration if available
-  const duration = result.duration || estimateAudioDuration(audioData.size, fileName.split('.').pop() || '');
-  
-  return {
-    text: result.text,
-    duration: duration
-  };
-}
-
-// Estimate audio duration based on file size and format (fallback method)
-function estimateAudioDuration(fileSize: number, format: string): number {
-  // These are very rough estimates and will not be accurate
-  // Format-specific bitrate estimates in bits per second
-  const bitrates: {[key: string]: number} = {
-    'mp3': 128000,    // 128 kbps
-    'mp4': 192000,    // 192 kbps
-    'm4a': 192000,    // 192 kbps
-    'wav': 1411000,   // CD quality, 1411 kbps
-    'webm': 128000,   // Varies widely, using 128 kbps as estimate
-    'mpeg': 128000,   // 128 kbps
-    'mpga': 128000,   // 128 kbps
-  };
-  
-  const bitrate = bitrates[format] || 128000;
-  const durationSeconds = Math.round((fileSize * 8) / bitrate);
-  
-  return durationSeconds;
-}
-
-// Process large audio file by format-aware chunking
-async function processLargeFile(
-  supabase: any, 
-  transcriptionId: string,
-  fileData: Blob, 
-  fileName: string
-): Promise<{text: string, duration?: number}> {
-  console.log(`Processing large file: ${fileName}, size: ${fileData.size} bytes`);
-  
-  const fileExt = fileName.split('.').pop()?.toLowerCase() || '';
-  
-  // For m4a files and other formats, we need to use time-based chunking
-  // But since we can't easily do that in this environment, we'll use a specialized approach
-  
-  // For now, we'll use a more intelligent byte-based chunking that preserves file headers
-  
-  // Calculate optimal chunk size based on file type
-  // Leave extra headroom for headers to ensure valid audio fragments
-  const chunkSize = MAX_FILE_SIZE - 2 * 1024 * 1024; // 2MB safety buffer
-  
-  // Get total file as array buffer for processing
-  const arrayBuffer = await fileData.arrayBuffer();
-  const fileBytes = new Uint8Array(arrayBuffer);
-  
-  // Estimate total chunks
-  const estimatedChunks = Math.ceil(fileData.size / chunkSize);
-  console.log(`Estimated ${estimatedChunks} chunks needed for processing`);
-  
-  // Update status to show chunking started
-  await updateTranscriptionProgress(
-    supabase,
-    transcriptionId,
-    'processing',
-    `Splitting file into ${estimatedChunks} segments for processing`
-  );
-  
-  // For audio formats that need header preservation, we create temporary files with headers
-
-  // For m4a and formats where splitting is problematic, use header-aware chunking
-  if (['m4a', 'mp4'].includes(fileExt)) {
-    return await processAudioWithHeaders(supabase, transcriptionId, fileBytes, fileExt, fileName, chunkSize);
-  } else {
-    // For other formats, use regular chunking with small overlaps
-    return await processRegularChunks(supabase, transcriptionId, fileBytes, fileExt, fileName, chunkSize);
-  }
-}
-
-// Process audio that requires header preservation
-async function processAudioWithHeaders(
-  supabase: any,
-  transcriptionId: string,
-  fileBytes: Uint8Array,
-  fileExt: string,
-  fileName: string,
-  chunkSize: number
-): Promise<{text: string, duration?: number}> {
-  // For m4a/mp4 files, we'll try to create segments with synthetic headers
-  // This is a simplified approach - production code would need a proper audio processing library
-  
-  // Identify important header portions (first 1MB)
-  const headerSize = 1024 * 1024; // 1MB for header
-  const headerData = fileBytes.slice(0, headerSize);
-  
-  // Calculate chunks
-  const contentSize = fileBytes.length - headerSize;
-  const contentChunkSize = chunkSize - headerSize;
-  const numChunks = Math.ceil(contentSize / contentChunkSize);
-  
-  console.log(`Processing ${fileExt} file with header preservation. Creating ${numChunks} segments.`);
-  
-  const transcriptions: string[] = [];
-  let processedChunks = 0;
-  let totalDuration = 0;
-  
-  // Process each content chunk with header prepended
-  for (let i = 0; i < numChunks; i++) {
-    // Update progress
-    await updateTranscriptionProgress(
-      supabase,
-      transcriptionId,
-      'processing',
-      `Processing segment ${i+1} of ${numChunks}`
-    );
+    console.error(`Transcription ${transcriptionId} failed:`, error);
     
-    const contentStart = headerSize + (i * contentChunkSize);
-    const contentEnd = Math.min(contentStart + contentChunkSize, fileBytes.length);
-    
-    // Create a chunk with header + content segment
-    const contentSegment = fileBytes.slice(contentStart, contentEnd);
-    
-    // Create combined chunk with header
-    const combinedChunk = new Uint8Array(headerData.length + contentSegment.length);
-    combinedChunk.set(headerData, 0);
-    combinedChunk.set(contentSegment, headerData.length);
-    
-    const chunkBlob = new Blob([combinedChunk], { type: `audio/${fileExt}` });
-    const chunkName = `${fileName.split('.')[0]}_chunk${i+1}.${fileExt}`;
-    
-    try {
-      const chunkResult = await processAudioChunk(chunkBlob, chunkName);
-      transcriptions.push(chunkResult.text);
-      if (chunkResult.duration) {
-        totalDuration += chunkResult.duration;
-      }
-      processedChunks++;
-      
-      console.log(`Completed segment ${i+1}/${numChunks}`);
-    } catch (error) {
-      console.error(`Error processing segment ${i+1}/${numChunks}:`, error);
-      // Continue with other chunks even if one fails
-    }
-  }
-  
-  console.log(`Processed ${processedChunks}/${numChunks} segments successfully`);
-  
-  // If we don't have reliable duration data from API, estimate it
-  if (totalDuration === 0) {
-    totalDuration = estimateAudioDuration(fileBytes.length, fileExt);
-  }
-  
-  // Combine all transcriptions
-  return {
-    text: transcriptions.join(' '),
-    duration: totalDuration
-  };
-}
-
-// Process audio with regular chunking + small overlaps
-async function processRegularChunks(
-  supabase: any,
-  transcriptionId: string,
-  fileBytes: Uint8Array,
-  fileExt: string,
-  fileName: string,
-  chunkSize: number
-): Promise<{text: string, duration?: number}> {
-  // Add small overlaps between chunks to ensure no content is lost
-  const overlap = 1024 * 512; // 512KB overlap
-  const effectiveChunkSize = chunkSize - overlap;
-  
-  // Calculate number of chunks needed
-  const numChunks = Math.ceil(fileBytes.length / effectiveChunkSize);
-  console.log(`Processing with ${numChunks} overlapping chunks`);
-  
-  const transcriptions: string[] = [];
-  let processedChunks = 0;
-  let totalDuration = 0;
-  
-  // Process each chunk
-  for (let i = 0; i < numChunks; i++) {
-    // Update progress
-    await updateTranscriptionProgress(
-      supabase,
-      transcriptionId,
-      'processing',
-      `Processing segment ${i+1} of ${numChunks}`
-    );
-    
-    const start = i * effectiveChunkSize;
-    const end = Math.min(start + chunkSize, fileBytes.length);
-    
-    console.log(`Processing chunk ${i+1}/${numChunks}, bytes ${start}-${end}`);
-    
-    // Get chunk data with overlap
-    const chunkData = fileBytes.slice(start, end);
-    const chunkBlob = new Blob([chunkData], { type: `audio/${fileExt}` });
-    const chunkName = `${fileName.split('.')[0]}_chunk${i+1}.${fileExt}`;
-    
-    try {
-      // Process this chunk
-      const chunkResult = await processAudioChunk(chunkBlob, chunkName);
-      
-      transcriptions.push(chunkResult.text);
-      if (chunkResult.duration) {
-        // For overlapping chunks, we need to estimate actual duration
-        // This is simplified and not entirely accurate
-        const chunkDuration = chunkResult.duration;
-        if (i < numChunks - 1) {
-          // Estimate overlap duration (rough approximation)
-          const overlapDuration = (overlap / chunkData.length) * chunkDuration;
-          totalDuration += (chunkDuration - overlapDuration);
-        } else {
-          // Last chunk has no following overlap
-          totalDuration += chunkDuration;
-        }
-      }
-      
-      processedChunks++;
-      
-      console.log(`Chunk ${i+1} transcription complete`);
-    } catch (error) {
-      console.error(`Error processing chunk ${i+1}:`, error);
-      // Continue with other chunks even if one fails
-    }
-  }
-  
-  console.log(`Processed ${processedChunks}/${numChunks} chunks successfully`);
-  
-  // If we don't have reliable duration data from API, estimate it
-  if (totalDuration === 0) {
-    totalDuration = estimateAudioDuration(fileBytes.length, fileExt);
-  }
-  
-  // Combine all transcriptions
-  return {
-    text: transcriptions.join(' '),
-    duration: totalDuration
-  };
-}
-
-// Helper function to update transcription status
-async function updateTranscriptionStatus(
-  supabase: any,
-  id: string,
-  status: string,
-  transcript: string | null = null,
-  error: string | null = null,
-  audioDuration: number | null = null
-) {
-  const updateData: Record<string, any> = {
-    status,
-    updated_at: new Date().toISOString(),
-  };
-  
-  if (transcript !== null) {
-    updateData.transcript = transcript;
-  }
-  
-  if (error !== null) {
-    updateData.error = error;
-  }
-  
-  if (audioDuration !== null) {
-    updateData.audio_duration = audioDuration;
-  }
-  
-  const { error: updateError } = await supabase
-    .from('transcriptions')
-    .update(updateData)
-    .eq('id', id);
-    
-  if (updateError) {
-    console.error('Failed to update transcription status:', updateError);
-  }
-}
-
-// Helper function to update transcription progress
-async function updateTranscriptionProgress(
-  supabase: any,
-  id: string,
-  status: string,
-  progress_message: string
-) {
-  const { error: updateError } = await supabase
-    .from('transcriptions')
-    .update({
-      status,
-      progress_message,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', id);
-    
-  if (updateError) {
-    console.error('Failed to update transcription progress:', updateError);
+    // Update the transcription record with the error
+    await supabase
+      .from('transcriptions')
+      .update({ 
+        status: 'failed',
+        error: error.message,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', transcriptionId);
   }
 }

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { Download, Lock } from "lucide-react";
+import { Download, Lock, Clock, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import { useSubscription } from "@/context/SubscriptionContext";
@@ -171,7 +171,12 @@ const TranscriptionDisplay = ({
               <Separator orientation="vertical" className="h-4" />
               <div className="flex items-center">
                 <span className="font-medium">Duration:</span>
-                <span className="ml-1">{formattedDuration}</span>
+                <span className="ml-1 flex items-center">
+                  {formattedDuration}
+                  <Badge variant="secondary" className="ml-1 text-xs h-5 px-1 py-0" title="Duration confirmed by transcription service">
+                    <Clock className="w-3 h-3 mr-1" /> Confirmed
+                  </Badge>
+                </span>
               </div>
             </>
           )}

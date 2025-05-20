@@ -4,13 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { Upload, Lock, Clock } from "lucide-react";
+import { Upload, Lock, Clock, AlertCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { v4 as uuidv4 } from "uuid";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSubscription } from "@/context/SubscriptionContext";
 import { Badge } from "@/components/ui/badge";
+import { getAudioDuration } from "@/utils/audioUtils";
 import {
   Dialog,
   DialogContent,
@@ -33,7 +34,9 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
   const [uploading, setUploading] = useState(false);
   const [customTitle, setCustomTitle] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [estimatedDuration, setEstimatedDuration] = useState<number | null>(null);
+  const [detectedDuration, setDetectedDuration] = useState<number | null>(null);
+  const [isDurationEstimated, setIsDurationEstimated] = useState(true);
+  const [isAnalyzingAudio, setIsAnalyzingAudio] = useState(false);
   
   // Use our subscription context
   const { 
@@ -77,29 +80,7 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     }
   };
 
-  // Estimate audio duration based on file size and format
-  const estimateAudioDuration = (file: File): number => {
-    // Format-specific bitrate estimates in bits per second
-    const bitrates: {[key: string]: number} = {
-      'mp3': 128000,    // 128 kbps
-      'mp4': 192000,    // 192 kbps
-      'm4a': 192000,    // 192 kbps
-      'wav': 1411000,   // CD quality, 1411 kbps
-      'webm': 128000,   // Varies widely, using 128 kbps as estimate
-      'mpeg': 128000,   // 128 kbps
-      'mpga': 128000,   // 128 kbps
-    };
-    
-    const fileExt = file.name.split('.').pop()?.toLowerCase() || 'mp3';
-    const bitrate = bitrates[fileExt] || 128000;
-    
-    // Calculate duration in seconds (file size in bits / bitrate)
-    const durationSeconds = Math.round((file.size * 8) / bitrate);
-    
-    return durationSeconds;
-  };
-
-  const validateAndSetFile = (file: File) => {
+  const validateAndSetFile = async (file: File) => {
     // Check file type - updated to match Whisper supported formats
     const validAudioTypes = [
       'audio/mpeg', // mp3, mpga
@@ -139,35 +120,47 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
       return;
     }
     
-    // Estimate audio duration and check against monthly limits
-    const estimatedSeconds = estimateAudioDuration(file);
-    setEstimatedDuration(estimatedSeconds);
-    
-    // Check if adding this audio would exceed monthly limits
-    if (userUsage && !checkMonthlyUsage(estimatedSeconds)) {
-      const estimatedMinutes = Math.round(estimatedSeconds / 60);
-      toast.error(
-        `This ${estimatedMinutes} minute audio would exceed your monthly limit of ${maxMonthlyMinutes} minutes. Please upgrade your plan.`,
-        {
-          action: {
-            label: 'Upgrade',
-            onClick: () => {
-              toast("This would navigate to upgrade page");
-            },
-          },
-        }
-      );
-      return;
-    }
-
     setSelectedFile(file);
     // Set a default title based on file name without extension
     setCustomTitle(file.name.split('.').slice(0, -1).join('.'));
     
-    // Open the dialog immediately after file is selected
-    setDialogOpen(true);
+    // Start analyzing the audio duration
+    setIsAnalyzingAudio(true);
+    setIsDurationEstimated(true);
     
-    toast.success(`File "${file.name}" selected`);
+    try {
+      // Get the precise audio duration using Web Audio API
+      const duration = await getAudioDuration(file);
+      setDetectedDuration(duration);
+      setIsDurationEstimated(false);
+      
+      // Check if adding this audio would exceed monthly limits
+      if (userUsage && !checkMonthlyUsage(duration)) {
+        const estimatedMinutes = Math.round(duration / 60);
+        toast.error(
+          `This ${estimatedMinutes} minute audio would exceed your monthly limit of ${maxMonthlyMinutes} minutes. Please upgrade your plan.`,
+          {
+            action: {
+              label: 'Upgrade',
+              onClick: () => {
+                toast("This would navigate to upgrade page");
+              },
+            },
+          }
+        );
+        setIsAnalyzingAudio(false);
+        return;
+      }
+      
+      // Open the dialog after duration is detected
+      setDialogOpen(true);
+      toast.success(`File "${file.name}" selected`);
+    } catch (error) {
+      console.error("Error detecting audio duration:", error);
+      toast.error("Error analyzing the audio file. Please try again.");
+    } finally {
+      setIsAnalyzingAudio(false);
+    }
   };
 
   const handleDialogClose = () => {
@@ -232,7 +225,8 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
           filePath: filePath,
           fileName: selectedFile.name,
           fileSize: selectedFile.size,
-          customTitle: finalTitle
+          customTitle: finalTitle,
+          estimatedDuration: detectedDuration  // Send our detected duration to help with usage tracking
         })
       });
 
@@ -244,11 +238,15 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
       const result = await response.json();
       toast.success('File uploaded and transcription started');
       
-      // If we have an estimated duration, preemptively update usage
+      // If we have a detected duration, preemptively update usage
       // The actual duration will be updated when processing completes
-      if (estimatedDuration !== null) {
+      if (detectedDuration !== null) {
         try {
-          await updateMonthlyUsage(estimatedDuration);
+          // Let the user know if we're using an estimated duration
+          if (isDurationEstimated) {
+            toast.info('Using estimated audio duration for usage tracking. This will be updated when processing completes.');
+          }
+          await updateMonthlyUsage(detectedDuration);
         } catch (error) {
           console.error('Failed to update usage estimate:', error);
         }
@@ -344,9 +342,9 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
                 type="button"
                 onClick={() => inputRef.current?.click()}
                 className="mt-4"
-                disabled={isProcessing || uploading || (userUsage?.percentUsed || 0) >= 100}
+                disabled={isProcessing || uploading || (userUsage?.percentUsed || 0) >= 100 || isAnalyzingAudio}
               >
-                Select File
+                {isAnalyzingAudio ? 'Analyzing Audio...' : 'Select File'}
               </Button>
               <input
                 ref={inputRef}
@@ -354,10 +352,26 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
                 className="hidden"
                 accept="audio/*"
                 onChange={handleChange}
-                disabled={isProcessing || uploading}
+                disabled={isProcessing || uploading || isAnalyzingAudio}
               />
             </div>
           </div>
+
+          {isAnalyzingAudio && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Analyzing audio file</span>
+                <span>Please wait...</span>
+              </div>
+              <Progress 
+                value={50}
+                className="animate-pulse-slow" 
+              />
+              <p className="text-xs text-muted-foreground text-center">
+                Calculating audio duration for accurate usage tracking
+              </p>
+            </div>
+          )}
 
           {uploading && (
             <div className="space-y-2">
@@ -415,14 +429,26 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
                   <p className="font-medium text-sm truncate max-w-[200px]">
                     {selectedFile.name}
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatFileSize(selectedFile.size)}
-                    {estimatedDuration && (
-                      <span className="ml-2">
-                        • Est. duration: {formatTime(estimatedDuration)}
-                      </span>
-                    )}
-                  </p>
+                  <div>
+                    <p className="text-xs text-muted-foreground">
+                      {formatFileSize(selectedFile.size)}
+                      {detectedDuration && (
+                        <span className="ml-2 flex items-center">
+                          • Duration: {formatTime(detectedDuration)}
+                          {isDurationEstimated && (
+                            <Badge variant="outline" className="ml-1 text-xs h-5 px-1 py-0">
+                              <AlertCircle className="w-3 h-3 mr-1" /> Estimated
+                            </Badge>
+                          )}
+                          {!isDurationEstimated && (
+                            <Badge variant="secondary" className="ml-1 text-xs h-5 px-1 py-0">
+                              <Clock className="w-3 h-3 mr-1" /> Confirmed
+                            </Badge>
+                          )}
+                        </span>
+                      )}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

@@ -46,11 +46,12 @@ const Index = () => {
           if (data.audio_duration) {
             setAudioDuration(data.audio_duration);
             
-            // Update monthly usage with the actual audio duration
+            // Update monthly usage with the actual audio duration from the server
             try {
               await updateMonthlyUsage(data.audio_duration);
+              console.log(`Updated usage with confirmed duration: ${data.audio_duration}s`);
             } catch (error) {
-              console.error('Failed to update usage:', error);
+              console.error('Failed to update usage with confirmed duration:', error);
             }
           }
           
