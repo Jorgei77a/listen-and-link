@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -8,10 +7,9 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { ExportOptions } from "@/components/editor/ExportOptions";
 import { AudioPlayer } from "@/components/editor/AudioPlayer";
-import { InteractiveTranscript } from "@/components/editor/InteractiveTranscript";
+import { EditableInteractiveTranscript } from "@/components/editor/EditableInteractiveTranscript";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
 import { TranscriptSegment } from "@/utils/transcriptSyncUtils";
-import { LexicalEditor } from "@/components/editor/LexicalEditor";
 
 interface TranscriptionDisplayProps {
   transcript: string;
@@ -90,7 +88,6 @@ const TranscriptionDisplay = ({
 
     console.log(`TranscriptionDisplay: Setting jumpToTime to ${segment.start}`);
     setJumpToTime(segment.start);
-    // No longer setting jumpToTime to null here.
   };
 
   // Handle playback state changes
@@ -150,22 +147,9 @@ const TranscriptionDisplay = ({
           )}
         </div>
         
-        {/* Interactive Transcript */}
-        {segments && segments.length > 0 && (
-          <div className="mb-6 border rounded-md">
-            <InteractiveTranscript
-              segments={segments}
-              currentTime={currentTime}
-              onSegmentClick={handleSegmentClick}
-              isPlaying={isPlaying}
-              className="h-[300px]"
-            />
-          </div>
-        )}
-        
         {/* Audio Player */}
         {audioUrl && (
-          <div className="mt-4 mb-6">
+          <div className="mt-4 mb-4">
             <AudioPlayer 
               src={audioUrl} 
               onTimeUpdate={handleTimeUpdate}
@@ -175,16 +159,20 @@ const TranscriptionDisplay = ({
           </div>
         )}
         
-        {/* Lexical Editor for transcript editing */}
-        <div className="mt-6 mb-6">
-          <h3 className="text-lg font-medium mb-2">Edit Transcript</h3>
-          <LexicalEditor
-            initialText={transcript}
-            segments={segments}
-            onEditorMount={handleEditorMount}
-            currentTimeInSeconds={currentTime}
-          />
-        </div>
+        {/* Editable Interactive Transcript - combines navigation and editing */}
+        {segments && segments.length > 0 && (
+          <div className="mt-4 border rounded-md">
+            <h3 className="text-lg font-medium px-4 pt-3 pb-1">Transcript</h3>
+            <EditableInteractiveTranscript
+              segments={segments}
+              currentTime={currentTime}
+              onSegmentClick={handleSegmentClick}
+              isPlaying={isPlaying}
+              className="h-[400px]"
+              onEditorMount={handleEditorMount}
+            />
+          </div>
+        )}
         
         <div className="mt-6 text-center">
           <Button onClick={onReset}>Transcribe Another File</Button>

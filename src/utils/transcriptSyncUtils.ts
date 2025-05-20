@@ -6,6 +6,7 @@ export interface TranscriptSegment {
   start: number;
   end: number;
   text: string;
+  id?: string;
 }
 
 /**
@@ -117,4 +118,26 @@ export const calculateScrollProgress = (
   
   // Ensure we stay between 0 and 1
   return Math.max(0, Math.min(1, segmentDuration > 0 ? timeIntoSegment / segmentDuration : 0));
+};
+
+/**
+ * Extracts plain text from all segments
+ */
+export const getPlainTextFromSegments = (segments: TranscriptSegment[]): string => {
+  return segments.map(segment => segment.text).join("\n");
+};
+
+/**
+ * Updates a segment's text content
+ */
+export const updateSegmentText = (
+  segments: TranscriptSegment[], 
+  segmentStart: number, 
+  newText: string
+): TranscriptSegment[] => {
+  return segments.map(segment => 
+    segment.start === segmentStart 
+      ? { ...segment, text: newText } 
+      : segment
+  );
 };
