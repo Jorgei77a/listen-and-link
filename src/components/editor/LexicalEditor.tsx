@@ -1,5 +1,5 @@
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
@@ -18,7 +18,8 @@ import {
   LexicalEditor as LexicalEditorType,
   ParagraphNode,
   LexicalNode,
-  $isRootNode
+  $isRootNode,
+  $getNodeByKey
 } from "lexical";
 import { cn } from "@/lib/utils";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
@@ -35,6 +36,7 @@ interface LexicalEditorProps {
   onEditorMount?: (editor: LexicalEditorType) => void;
   onEditorChange?: (editorState: EditorState) => void;
   currentTimeInSeconds?: number | null;
+  onSegmentClick?: (time: number) => void;
 }
 
 // Create a custom interface to handle our timestamps
@@ -134,6 +136,8 @@ function InitializeContent({
                 if (element) {
                   element.setAttribute('data-start', timestampData.start);
                   element.setAttribute('data-end', timestampData.end);
+                  // Add a visual indicator and pointer cursor to show clickable areas
+                  element.classList.add('has-timestamp');
                 }
               }
             });
@@ -156,15 +160,71 @@ function InitializeContent({
 }
 
 // Component to handle timestamp highlighting based on current audio time
-function TimestampHighlighter({ currentTimeInSeconds }: { currentTimeInSeconds?: number | null }) {
+function TimestampHighlighter({ 
+  currentTimeInSeconds, 
+  onSegmentClick 
+}: { 
+  currentTimeInSeconds?: number | null;
+  onSegmentClick?: (time: number) => void;
+}) {
   const [editor] = useLexicalComposerContext();
+  const lastHighlightedRef = useRef<HTMLElement | null>(null);
   
+  useEffect(() => {
+    if (!editor) return;
+    
+    // Set up click handlers on paragraphs with timestamps
+    const setupClickHandlers = () => {
+      const editorElement = editor.getRootElement();
+      if (!editorElement) return;
+      
+      // Find all paragraphs with timestamp data
+      const paragraphsWithTimestamps = editorElement.querySelectorAll('[data-start]');
+      
+      paragraphsWithTimestamps.forEach((paragraph) => {
+        // Only add click handler if we have a callback and haven't already set it up
+        if (onSegmentClick && !paragraph.hasAttribute('data-click-handler-added')) {
+          paragraph.addEventListener('click', () => {
+            const startTime = parseFloat(paragraph.getAttribute('data-start') || '0');
+            if (onSegmentClick) {
+              onSegmentClick(startTime);
+            }
+          });
+          
+          // Mark as having click handler to avoid duplicates
+          paragraph.setAttribute('data-click-handler-added', 'true');
+        }
+      });
+    };
+    
+    // Initial setup
+    setupClickHandlers();
+    
+    // Setup observer to handle dynamically added content
+    const observer = new MutationObserver(() => {
+      setupClickHandlers();
+    });
+    
+    const editorElement = editor.getRootElement();
+    if (editorElement) {
+      observer.observe(editorElement, { 
+        childList: true, 
+        subtree: true 
+      });
+    }
+    
+    return () => {
+      observer.disconnect();
+    };
+  }, [editor, onSegmentClick]);
+
   useEffect(() => {
     if (!currentTimeInSeconds || !editor) return;
     
     editor.update(() => {
       const root = $getRoot();
       const paragraphs = root.getChildren();
+      let activeElementFound = false;
       
       paragraphs.forEach((paragraph) => {
         const element = editor.getElementByKey(paragraph.getKey());
@@ -175,21 +235,97 @@ function TimestampHighlighter({ currentTimeInSeconds }: { currentTimeInSeconds?:
         const end = parseFloat(element.getAttribute('data-end') || '0');
         
         if (start <= currentTimeInSeconds && currentTimeInSeconds <= end) {
-          element.classList.add('bg-primary/10', 'transition-colors');
+          activeElementFound = true;
           
-          // Scroll into view if needed
-          const rect = element.getBoundingClientRect();
-          const parentRect = element.parentElement?.getBoundingClientRect();
-          
-          if (parentRect && (rect.bottom > parentRect.bottom || rect.top < parentRect.top)) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Only highlight and scroll if this is a new element
+          if (lastHighlightedRef.current !== element) {
+            // Remove highlight from previous element
+            if (lastHighlightedRef.current) {
+              lastHighlightedRef.current.classList.remove('bg-primary/10', 'active-segment');
+            }
+            
+            // Add highlight to current element
+            element.classList.add('bg-primary/10', 'active-segment', 'transition-colors');
+            lastHighlightedRef.current = element;
+            
+            // Scroll into view if needed
+            const editorContainer = editor.getRootElement()?.closest('.relative.bg-muted\\/30.rounded-md');
+            if (!editorContainer) return;
+            
+            const containerRect = editorContainer.getBoundingClientRect();
+            const elementRect = element.getBoundingClientRect();
+            
+            // Check if element is outside the visible area of the container
+            const isOutOfView = 
+              elementRect.top < containerRect.top || 
+              elementRect.bottom > containerRect.bottom;
+            
+            if (isOutOfView) {
+              // Use smooth scrolling to avoid jarring transitions
+              element.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'center'
+              });
+            }
           }
         } else {
-          element.classList.remove('bg-primary/10');
+          // Only remove highlighting if this element was previously highlighted
+          if (lastHighlightedRef.current === element) {
+            element.classList.remove('bg-primary/10', 'active-segment');
+            lastHighlightedRef.current = null;
+          }
         }
       });
+      
+      // If no active element was found, clear the previous highlight
+      if (!activeElementFound && lastHighlightedRef.current) {
+        lastHighlightedRef.current.classList.remove('bg-primary/10', 'active-segment');
+        lastHighlightedRef.current = null;
+      }
     });
   }, [currentTimeInSeconds, editor]);
+  
+  return null;
+}
+
+// Custom plugin for handling paragraph clicks
+function ClickableTimestampsPlugin({ onSegmentClick }: { onSegmentClick?: (time: number) => void }) {
+  const [editor] = useLexicalComposerContext();
+  
+  useEffect(() => {
+    if (!editor || !onSegmentClick) return;
+    
+    // Handle click events on the editor
+    const rootElement = editor.getRootElement();
+    if (!rootElement) return;
+    
+    const handleClick = (e: MouseEvent) => {
+      // Find the paragraph element that was clicked
+      let target = e.target as HTMLElement | null;
+      let paragraphElement: HTMLElement | null = null;
+      
+      // Walk up the DOM tree to find the paragraph
+      while (target && target !== rootElement) {
+        if (target.hasAttribute('data-start')) {
+          paragraphElement = target;
+          break;
+        }
+        target = target.parentElement;
+      }
+      
+      // If we found a paragraph with timestamp data, trigger the callback
+      if (paragraphElement) {
+        const startTime = parseFloat(paragraphElement.getAttribute('data-start') || '0');
+        onSegmentClick(startTime);
+      }
+    };
+    
+    rootElement.addEventListener('click', handleClick);
+    
+    return () => {
+      rootElement.removeEventListener('click', handleClick);
+    };
+  }, [editor, onSegmentClick]);
   
   return null;
 }
@@ -202,6 +338,7 @@ export function LexicalEditor({
   onEditorMount,
   onEditorChange,
   currentTimeInSeconds,
+  onSegmentClick,
 }: LexicalEditorProps) {
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const [isContentReady, setIsContentReady] = useState(false);
@@ -245,7 +382,7 @@ export function LexicalEditor({
           )}
           <RichTextPlugin
             contentEditable={
-              <ContentEditable className="min-h-[200px] max-h-[400px] overflow-y-auto p-4 outline-none" />
+              <ContentEditable className="min-h-[200px] max-h-[400px] overflow-y-auto p-4 outline-none transcript-content" />
             }
             placeholder={<div className="absolute top-[15px] left-[15px] text-muted-foreground">Start editing...</div>}
             ErrorBoundary={LexicalErrorBoundary}
@@ -265,7 +402,15 @@ export function LexicalEditor({
         
         {/* Handle timestamp highlighting */}
         {currentTimeInSeconds !== undefined && (
-          <TimestampHighlighter currentTimeInSeconds={currentTimeInSeconds} />
+          <TimestampHighlighter 
+            currentTimeInSeconds={currentTimeInSeconds}
+            onSegmentClick={onSegmentClick} 
+          />
+        )}
+        
+        {/* Add clickable timestamps plugin */}
+        {onSegmentClick && (
+          <ClickableTimestampsPlugin onSegmentClick={onSegmentClick} />
         )}
         
         <OnChangePlugin
@@ -280,6 +425,33 @@ export function LexicalEditor({
           }}
         />
       </LexicalComposer>
+
+      <style>
+        {`
+        /* Add styling for timestamps */
+        .has-timestamp {
+          cursor: pointer;
+          position: relative;
+          border-left: 2px solid transparent;
+          padding-left: 4px;
+        }
+        
+        .has-timestamp:hover {
+          background-color: rgba(0,0,0,0.05);
+          border-left-color: var(--primary);
+        }
+        
+        .active-segment {
+          border-left: 2px solid var(--primary) !important;
+          background-color: rgba(var(--primary), 0.1) !important;
+        }
+        
+        /* Improve scrolling behavior */
+        .transcript-content {
+          scroll-behavior: smooth;
+        }
+        `}
+      </style>
     </div>
   );
 }

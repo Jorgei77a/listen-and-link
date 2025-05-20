@@ -1,5 +1,5 @@
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -61,6 +61,7 @@ const TranscriptionDisplay = ({
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [editorReady, setEditorReady] = useState(false);
+  const audioPlayerCallbackRef = useRef<(time: number) => void | null>(null);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
@@ -85,10 +86,19 @@ const TranscriptionDisplay = ({
     setCurrentTime(time);
   };
 
-  const jumpToTime = (time: number) => {
-    // This would be called when clicking on a paragraph with a timestamp
+  // This function will be called when a text segment is clicked
+  const handleSegmentClick = useCallback((time: number) => {
     setCurrentTime(time);
-  };
+    // Call the audio player's jumpToTime function
+    if (audioPlayerCallbackRef.current) {
+      audioPlayerCallbackRef.current(time);
+    }
+  }, []);
+
+  // Register the jump-to-time callback from the audio player
+  const handleJumpToTimeRegistration = useCallback((callback: (time: number) => void) => {
+    audioPlayerCallbackRef.current = callback;
+  }, []);
 
   // Extract statistics from the transcript
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
@@ -150,6 +160,7 @@ const TranscriptionDisplay = ({
           onEditorMount={handleEditorMount}
           onEditorChange={handleEditorChange}
           currentTimeInSeconds={currentTime}
+          onSegmentClick={handleSegmentClick}
         />
         
         {/* Audio Player */}
@@ -158,7 +169,7 @@ const TranscriptionDisplay = ({
             <AudioPlayer 
               src={audioUrl} 
               onTimeUpdate={handleTimeUpdate} 
-              onJumpToTime={jumpToTime}
+              onJumpToTime={handleJumpToTimeRegistration}
             />
           </div>
         )}

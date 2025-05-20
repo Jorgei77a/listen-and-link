@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Loader2 } from "lucide-react";
 
 interface AudioPlayerProps {
   src: string;
@@ -20,6 +20,8 @@ export function AudioPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSeeking, setIsSeeking] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const togglePlayPause = () => {
@@ -27,7 +29,19 @@ export function AudioPlayer({
       if (isPlaying) {
         audioRef.current.pause();
       } else {
-        audioRef.current.play();
+        // Handle play promise to avoid "The play() request was interrupted" errors
+        const playPromise = audioRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              // Playback started successfully
+            })
+            .catch(error => {
+              console.error("Playback error:", error);
+              // Reset state if playback fails
+              setIsPlaying(false);
+            });
+        }
       }
       setIsPlaying(!isPlaying);
     }
@@ -35,19 +49,57 @@ export function AudioPlayer({
 
   const skipForward = () => {
     if (audioRef.current) {
-      audioRef.current.currentTime += 5;
+      setIsSeeking(true);
+      const newTime = Math.min(audioRef.current.currentTime + 5, duration);
+      jumpToTime(newTime);
     }
   };
 
   const skipBackward = () => {
     if (audioRef.current) {
-      audioRef.current.currentTime -= 5;
+      setIsSeeking(true);
+      const newTime = Math.max(audioRef.current.currentTime - 5, 0);
+      jumpToTime(newTime);
+    }
+  };
+
+  // Unified function for jumping to specific time
+  const jumpToTime = (time: number) => {
+    if (!audioRef.current) return;
+    
+    setIsSeeking(true);
+    
+    // Update UI immediately for responsiveness
+    setCurrentTime(time);
+    
+    // Update audio element's time
+    audioRef.current.currentTime = time;
+    
+    // Trigger the callback if provided
+    if (onTimeUpdate) {
+      onTimeUpdate(time);
+    }
+    
+    // Resume playback if it was previously playing
+    if (isPlaying) {
+      const playPromise = audioRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            // Playback resumed successfully
+          })
+          .catch(error => {
+            console.error("Error resuming playback after seek:", error);
+            setIsPlaying(false);
+          });
+      }
     }
   };
 
   const handleTimeUpdate = () => {
     if (audioRef.current) {
       setCurrentTime(audioRef.current.currentTime);
+      setIsSeeking(false);
       if (onTimeUpdate) {
         onTimeUpdate(audioRef.current.currentTime);
       }
@@ -57,18 +109,13 @@ export function AudioPlayer({
   const handleLoadedMetadata = () => {
     if (audioRef.current) {
       setDuration(audioRef.current.duration);
+      setIsLoading(false);
     }
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
-    setCurrentTime(time);
-    if (audioRef.current) {
-      audioRef.current.currentTime = time;
-    }
-    if (onTimeUpdate) {
-      onTimeUpdate(time);
-    }
+    jumpToTime(time);
   };
 
   const formatTime = (time: number) => {
@@ -77,12 +124,29 @@ export function AudioPlayer({
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // Effect to handle external time jumps
+  const handleCanPlay = () => {
+    setIsLoading(false);
+  };
+
+  const handleWaiting = () => {
+    setIsLoading(true);
+  };
+
+  // Effect to handle external time jumps from text clicks
   useEffect(() => {
-    if (onJumpToTime) {
-      return () => {}; // This effect just sets up the callback
+    if (onJumpToTime && audioRef.current) {
+      onJumpToTime((time: number) => jumpToTime(time));
     }
   }, [onJumpToTime]);
+
+  // Effect to handle src changes
+  useEffect(() => {
+    if (src) {
+      setIsLoading(true);
+      setIsPlaying(false);
+      setCurrentTime(0);
+    }
+  }, [src]);
 
   return (
     <div className={cn("flex flex-col space-y-2", className)}>
@@ -91,6 +155,8 @@ export function AudioPlayer({
         src={src}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
+        onCanPlay={handleCanPlay}
+        onWaiting={handleWaiting}
         onEnded={() => setIsPlaying(false)}
       />
       
@@ -101,6 +167,7 @@ export function AudioPlayer({
           size="icon" 
           className="h-8 w-8"
           title="Skip backward 5 seconds"
+          disabled={isLoading || currentTime === 0}
         >
           <SkipBack className="h-4 w-4" />
         </Button>
@@ -110,8 +177,11 @@ export function AudioPlayer({
           variant="default" 
           size="icon"
           className="h-10 w-10 rounded-full"
+          disabled={isLoading || !src}
         >
-          {isPlaying ? (
+          {isLoading ? (
+            <Loader2 className="h-5 w-5 animate-spin" />
+          ) : isPlaying ? (
             <Pause className="h-5 w-5" />
           ) : (
             <Play className="h-5 w-5 ml-0.5" />
@@ -124,6 +194,7 @@ export function AudioPlayer({
           size="icon" 
           className="h-8 w-8"
           title="Skip forward 5 seconds"
+          disabled={isLoading || currentTime >= duration}
         >
           <SkipForward className="h-4 w-4" />
         </Button>
@@ -140,7 +211,11 @@ export function AudioPlayer({
           max={duration || 0}
           value={currentTime}
           onChange={handleSeek}
-          className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+          className={cn(
+            "flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer",
+            isSeeking && "opacity-80"
+          )}
+          disabled={isLoading || !src}
         />
         
         <span className="text-sm tabular-nums">
