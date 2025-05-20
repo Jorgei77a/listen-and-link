@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -60,7 +61,9 @@ const TranscriptionDisplay = ({
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [editorReady, setEditorReady] = useState(false);
+  const [playerReady, setPlayerReady] = useState(false);
   const audioPlayerCallbackRef = useRef<((time: number) => void) | null>(null);
+  const lastSegmentClickTimeRef = useRef<number>(0);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
@@ -86,9 +89,18 @@ const TranscriptionDisplay = ({
     setCurrentTime(time);
   };
 
-  // This function will be called when a text segment is clicked
+  // Improved segment click handler with debouncing
   const handleSegmentClick = useCallback((time: number) => {
     console.log(`🔍 TranscriptionDisplay: Segment clicked at time ${time.toFixed(2)}s`);
+    
+    // Simple debounce for rapid clicks
+    const now = Date.now();
+    if (now - lastSegmentClickTimeRef.current < 500) {
+      console.log("🔍 TranscriptionDisplay: Ignoring rapid segment click");
+      return;
+    }
+    lastSegmentClickTimeRef.current = now;
+    
     setCurrentTime(time);
     
     // Call the audio player's jumpToTime function
@@ -104,12 +116,13 @@ const TranscriptionDisplay = ({
   const handleJumpToTimeRegistration = useCallback((callback: (time: number) => void) => {
     console.log("🔍 TranscriptionDisplay: Jump-to-time callback registered from audio player");
     audioPlayerCallbackRef.current = callback;
+    setPlayerReady(true);
   }, []);
 
-  // Debug effect to monitor audioPlayerCallbackRef changes
+  // Debug effect to monitor component state
   useEffect(() => {
-    console.log(`🔍 TranscriptionDisplay: audioPlayerCallbackRef is now ${audioPlayerCallbackRef.current ? "set" : "null"}`);
-  }, [audioPlayerCallbackRef.current]);
+    console.log(`🔍 TranscriptionDisplay: Component state - editorReady: ${editorReady}, playerReady: ${playerReady}, audioUrl: ${audioUrl ? "set" : "not set"}`);
+  }, [editorReady, playerReady, audioUrl]);
 
   // Extract statistics from the transcript
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
@@ -190,6 +203,7 @@ const TranscriptionDisplay = ({
           <p>Audio URL: {audioUrl ? "✅ Set" : "❌ Not set"}</p>
           <p>Current Time: {currentTime !== null ? `${currentTime.toFixed(2)}s` : "Not set"}</p>
           <p>Editor Ready: {editorReady ? "✅ Yes" : "❌ No"}</p>
+          <p>Player Ready: {playerReady ? "✅ Yes" : "❌ No"}</p>
           <p>Audio Player Callback: {audioPlayerCallbackRef.current ? "✅ Registered" : "❌ Not registered"}</p>
           <p>Segments: {segments.length}</p>
         </div>
