@@ -24,18 +24,20 @@ export function FeatureGate({
 }: FeatureGateProps) {
   const { hasFeature, currentTier, isLoading } = useSubscription();
 
-  const isEnabled = hasFeature(featureKey);
+  // During development, allow all features to be tested
+  const isDevelopment = true; // For development, make all features available
+  const isEnabled = isDevelopment || hasFeature(featureKey);
 
   // Loading state
   if (isLoading) {
     return <div className="animate-pulse bg-muted h-8 w-full rounded"></div>;
   }
 
-  // If feature is enabled, show the children
+  // If feature is enabled or in development, show the children
   if (isEnabled) {
     return (
       <div className="relative">
-        {showBadge && (
+        {showBadge && !isDevelopment && (
           <Badge 
             variant="secondary" 
             className="absolute -top-2 -right-2 text-xs z-10 opacity-70"

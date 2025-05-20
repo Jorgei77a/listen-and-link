@@ -153,7 +153,8 @@ async function processTranscription(
     const formData = new FormData();
     formData.append('file', fileData);
     formData.append('model', 'whisper-1');
-    formData.append('response_format', 'json');
+    formData.append('response_format', 'verbose_json'); // Request segments and timestamps
+    formData.append('timestamp_granularities', 'segment');
 
     // Update progress
     await supabase
@@ -183,17 +184,23 @@ async function processTranscription(
     const openAiData = await openAiResponse.json();
     const transcript = openAiData.text;
 
-    // Some transcription services return metadata like duration
-    // If OpenAI Whisper returns duration (it currently doesn't directly), we can use it
-    // For now we'll calculate it from segments or use other means
+    // Process segments data if available
+    let segments = [];
+    if (openAiData.segments && Array.isArray(openAiData.segments)) {
+      segments = openAiData.segments.map((segment: any) => ({
+        start: segment.start,
+        end: segment.end,
+        text: segment.text
+      }));
+    }
+
+    // Calculate audio duration based on segments
     let audioDuration = null;
-    
-    // If OpenAI returns audio segments with timestamps, we can estimate duration
-    if (openAiData.segments && openAiData.segments.length > 0) {
-      const lastSegment = openAiData.segments[openAiData.segments.length - 1];
+    if (segments.length > 0) {
+      const lastSegment = segments[segments.length - 1];
       audioDuration = Math.ceil(lastSegment.end);
     } else if (openAiData.duration) {
-      // If OpenAI someday directly returns duration
+      // If OpenAI directly returns duration
       audioDuration = Math.ceil(openAiData.duration);
     }
     
@@ -205,13 +212,14 @@ async function processTranscription(
       .from('transcriptions')
       .update({ 
         transcript: transcript,
+        segments: segments,
         status: 'completed',
         audio_duration: roundedDuration, // Use rounded duration
         updated_at: new Date().toISOString()
       })
       .eq('id', transcriptionId);
 
-    console.log(`Transcription ${transcriptionId} completed successfully.`);
+    console.log(`Transcription ${transcriptionId} completed successfully with ${segments.length} segments.`);
 
   } catch (error) {
     console.error(`Transcription ${transcriptionId} failed:`, error);

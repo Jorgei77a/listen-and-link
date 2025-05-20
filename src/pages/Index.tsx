@@ -10,14 +10,22 @@ import { supabase } from "@/integrations/supabase/client";
 import { SubscriptionBadge } from "@/components/SubscriptionBadge";
 import { useSubscription } from "@/context/SubscriptionContext";
 
+interface TranscriptionSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
 const Index = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [transcript, setTranscript] = useState<string | null>(null);
+  const [segments, setSegments] = useState<TranscriptionSegment[]>([]);
   const [currentFileName, setCurrentFileName] = useState<string>("");
   const [currentTranscriptionId, setCurrentTranscriptionId] = useState<string | null>(null);
   const [customTitle, setCustomTitle] = useState<string>("");
   const [transcriptionCompleted, setTranscriptionCompleted] = useState(false);
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string>("");
   
   const { updateMonthlyUsage } = useSubscription();
 
@@ -28,7 +36,7 @@ const Index = () => {
     const checkTranscription = async () => {
       const { data, error } = await supabase
         .from('transcriptions')
-        .select('*, audio_duration')
+        .select('*, audio_duration, segments, file_path')
         .eq('id', currentTranscriptionId)
         .single();
       
@@ -41,6 +49,34 @@ const Index = () => {
         if (data.status === 'completed' && data.transcript) {
           setTranscript(data.transcript);
           setIsProcessing(false);
+          
+          // Store segments if available
+          if (data.segments) {
+            try {
+              let parsedSegments: TranscriptionSegment[] = [];
+              
+              if (typeof data.segments === 'string') {
+                parsedSegments = JSON.parse(data.segments);
+              } else if (Array.isArray(data.segments)) {
+                parsedSegments = data.segments;
+              }
+              
+              setSegments(parsedSegments);
+            } catch (error) {
+              console.error('Failed to parse segments:', error);
+            }
+          }
+          
+          // Create signed URL for the audio file
+          if (data.file_path) {
+            const { data: signedUrl } = await supabase.storage
+              .from('audio_files')
+              .createSignedUrl(data.file_path, 3600); // 1 hour expiry
+              
+            if (signedUrl?.signedUrl) {
+              setAudioUrl(signedUrl.signedUrl);
+            }
+          }
           
           // Store the audio duration - make sure to round it here
           if (data.audio_duration) {
@@ -82,6 +118,8 @@ const Index = () => {
     setCustomTitle(title || file.name.split('.')[0]);
     setTranscriptionCompleted(false);
     setAudioDuration(null);
+    setAudioUrl("");
+    setSegments([]);
     
     if (transcriptionId) {
       setCurrentTranscriptionId(transcriptionId);
@@ -95,6 +133,8 @@ const Index = () => {
     setCustomTitle("");
     setTranscriptionCompleted(false);
     setAudioDuration(null);
+    setAudioUrl("");
+    setSegments([]);
   };
 
   return (
@@ -121,6 +161,8 @@ const Index = () => {
               fileName={currentFileName}
               customTitle={customTitle}
               audioDuration={audioDuration}
+              audioUrl={audioUrl}
+              segments={segments}
               onReset={handleReset} 
             />
           ) : (
