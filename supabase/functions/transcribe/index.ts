@@ -1,3 +1,4 @@
+
 // Import necessary modules
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
@@ -54,6 +55,9 @@ serve(async (req) => {
       );
     }
 
+    // Make sure estimatedDuration is rounded to an integer if provided
+    const roundedDuration = estimatedDuration ? Math.round(Number(estimatedDuration)) : null;
+
     // Create a transcription record in the database
     const { data: transcription, error: transcriptionError } = await supabase
       .from('transcriptions')
@@ -64,8 +68,8 @@ serve(async (req) => {
         custom_title: customTitle || fileName.split('.')[0],
         status: 'processing',
         progress_message: 'Starting transcription...',
-        // Store estimated duration until we get the real one
-        audio_duration: estimatedDuration || null
+        // Store rounded estimated duration until we get the real one
+        audio_duration: roundedDuration
       })
       .select()
       .single();
@@ -193,16 +197,16 @@ async function processTranscription(
       audioDuration = Math.ceil(openAiData.duration);
     }
     
-    // If we couldn't get duration from OpenAI, we'll keep the estimated duration
-    // that was provided when the transcription was created
-
+    // Make sure audio_duration is always an integer
+    const roundedDuration = audioDuration ? Math.round(Number(audioDuration)) : null;
+    
     // Update the transcription record with the transcript text, status, and actual duration if available
     await supabase
       .from('transcriptions')
       .update({ 
         transcript: transcript,
         status: 'completed',
-        audio_duration: audioDuration || transcription.audio_duration, // Use actual duration if available
+        audio_duration: roundedDuration, // Use rounded duration
         updated_at: new Date().toISOString()
       })
       .eq('id', transcriptionId);
