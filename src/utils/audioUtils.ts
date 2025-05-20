@@ -108,3 +108,62 @@ export const estimateAudioDuration = (file: File): number => {
   
   return durationSeconds;
 };
+
+/**
+ * Default buffer time configuration in seconds
+ * - segmentEndBuffer: Extra time to add after a segment's end time (prevents cutting off)
+ * - segmentLookaheadBuffer: Time to start highlighting the next segment before its start time
+ * - debugMode: Whether to show buffer timing information visually
+ */
+export const DEFAULT_SEGMENT_BUFFERS = {
+  segmentEndBuffer: 1.5,      // 1.5 seconds additional playback after segment end
+  segmentLookaheadBuffer: 0.3, // Start highlighting next segment 0.3s before its start
+  debugMode: false            // Set to true to enable visual buffer indicators
+};
+
+/**
+ * Check if a time is within a segment's bounds, accounting for buffer time
+ */
+export const isTimeInSegment = (
+  time: number, 
+  segmentStart: number, 
+  segmentEnd: number, 
+  bufferTime: number = DEFAULT_SEGMENT_BUFFERS.segmentEndBuffer
+): boolean => {
+  return segmentStart <= time && time <= (segmentEnd + bufferTime);
+};
+
+/**
+ * Find the active segment given the current time and a list of segments
+ */
+export const findActiveSegment = (
+  currentTime: number,
+  segments: Array<{ start: number; end: number }>,
+  options = DEFAULT_SEGMENT_BUFFERS
+): number | null => {
+  // First check if any segment is directly active (including buffer time)
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    if (isTimeInSegment(currentTime, segment.start, segment.end, options.segmentEndBuffer)) {
+      return i;
+    }
+  }
+  
+  // If no direct active segment, check for lookahead to next segment
+  for (let i = 0; i < segments.length - 1; i++) {
+    const currentSegment = segments[i];
+    const nextSegment = segments[i + 1];
+    
+    // If we're between current segment (plus buffer) and next segment's start
+    // but within the lookahead window of the next segment
+    if (
+      currentTime > (currentSegment.end + options.segmentEndBuffer) && 
+      currentTime < nextSegment.start &&
+      currentTime >= (nextSegment.start - options.segmentLookaheadBuffer)
+    ) {
+      return i + 1; // Return the next segment
+    }
+  }
+  
+  return null; // No active segment found
+};

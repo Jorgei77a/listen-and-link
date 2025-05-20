@@ -9,6 +9,7 @@ import { LexicalEditor } from "@/components/editor/LexicalEditor";
 import { AudioPlayer } from "@/components/editor/AudioPlayer";
 import { ExportOptions } from "@/components/editor/ExportOptions";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
+import { DEFAULT_SEGMENT_BUFFERS } from "@/utils/audioUtils";
 
 interface TranscriptionDisplayProps {
   transcript: string;
@@ -68,6 +69,13 @@ const TranscriptionDisplay = ({
   const isUpdatingFromEditorRef = useRef<boolean>(false);
   const currentTimeRef = useRef<number | null>(currentTime);
   const isFirstTimeUpdateRef = useRef<boolean>(true);
+  
+  // Configure buffer settings - can be adjusted based on content
+  const bufferSettings = {
+    ...DEFAULT_SEGMENT_BUFFERS,
+    segmentEndBuffer: 1.5,      // 1.5 seconds extra time after segment ends
+    segmentLookaheadBuffer: 0.3 // Start highlighting next segment 0.3s early
+  };
   
   // Keep currentTimeRef in sync
   useEffect(() => {
@@ -216,7 +224,7 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
-        {/* Lexical Editor with optimized props */}
+        {/* Lexical Editor with buffer settings */}
         <LexicalEditor 
           initialText={transcript}
           segments={segments}
@@ -225,6 +233,7 @@ const TranscriptionDisplay = ({
           onEditorChange={handleEditorChange}
           currentTimeInSeconds={currentTime}
           onSegmentClick={handleSegmentClick}
+          bufferSettings={bufferSettings}
         />
         
         {/* Audio Player with optimized props */}
@@ -238,10 +247,10 @@ const TranscriptionDisplay = ({
           </div>
         )}
         
-        {/* Simplified debug information */}
+        {/* Debug information - now includes buffer settings */}
         <div className="mt-4 p-2 bg-gray-50 rounded-md text-xs text-muted-foreground">
           <p>Status: {audioUrl ? "✅ Audio loaded" : "❌ No audio"}, Editor: {editorReady ? "✅ Ready" : "❌ Loading"}, Player: {playerReady ? "✅ Ready" : "❌ Loading"}</p>
-          {currentTime !== null && <p>Position: {currentTime.toFixed(2)}s</p>}
+          {currentTime !== null && <p>Position: {currentTime.toFixed(2)}s, Buffer: {bufferSettings.segmentEndBuffer.toFixed(1)}s</p>}
         </div>
         
         <div className="mt-6 text-center">
