@@ -2,8 +2,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { $getRoot } from "lexical";
-import { toast } from "sonner";
-import { SYNC_CONFIG } from "@/utils/audioSyncUtils";
 
 interface TranscriptSegmentHandlerProps {
   onSegmentClick?: (time: number) => void;
@@ -12,8 +10,6 @@ interface TranscriptSegmentHandlerProps {
 export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHandlerProps) {
   const [editor] = useLexicalComposerContext();
   const clickHandlersSetupRef = useRef(false);
-  const lastClickTimeRef = useRef(0);
-  const lastClickPositionRef = useRef(-1);
   const activeElementRef = useRef<HTMLElement | null>(null);
   const [activeSegmentKey, setActiveSegmentKey] = useState<string | null>(null);
   
@@ -52,17 +48,6 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
                 // Store element key to track which segment is active
                 const segmentKey = paragraph.getKey();
                 
-                // Prevent double-clicks or rapid clicks (debounce)
-                const now = Date.now();
-                if (now - lastClickTimeRef.current < 800 && start === lastClickPositionRef.current) {
-                  console.log("Ignoring rapid repeated click on same segment");
-                  return;
-                }
-                
-                // Update our tracking refs
-                lastClickTimeRef.current = now;
-                lastClickPositionRef.current = start;
-                
                 console.log(`Segment clicked with time: ${start}s`);
                 
                 // Remove highlight from previous active element
@@ -87,9 +72,6 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
                 
                 // Show visual feedback - persist highlight for longer duration
                 element.classList.add('bg-primary/20');
-                
-                // Don't remove the highlight immediately - it will stay until another segment is clicked
-                // or until clearActiveSegmentHighlight is called
               });
               
               // Mark as having a click handler
@@ -137,10 +119,35 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
     setupClickHandlers();
   }, [setupClickHandlers]);
   
+  // Highlight current active segment by key
+  const highlightSegmentByKey = useCallback((segmentKey: string) => {
+    if (!editor || !segmentKey) return;
+    
+    editor.update(() => {
+      try {
+        const element = editor.getElementByKey(segmentKey);
+        if (!element) return;
+        
+        // Remove previous highlight
+        if (activeElementRef.current && activeElementRef.current !== element) {
+          activeElementRef.current.classList.remove('bg-primary/20');
+        }
+        
+        // Set new active element
+        activeElementRef.current = element as HTMLElement;
+        element.classList.add('bg-primary/20');
+        setActiveSegmentKey(segmentKey);
+      } catch (error) {
+        console.error('Error highlighting segment:', error);
+      }
+    });
+  }, [editor]);
+  
   return {
     setupClickHandlers,
     refreshClickHandlers,
     clearActiveSegmentHighlight,
+    highlightSegmentByKey,
     activeSegmentKey
   };
 }

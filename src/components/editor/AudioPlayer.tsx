@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -6,8 +7,7 @@ import { Slider } from "@/components/ui/slider";
 import { 
   isAudioPlayable, 
   safeAudioOperation, 
-  formatTimestamp, 
-  SYNC_CONFIG 
+  formatTimestamp
 } from "@/utils/audioSyncUtils";
 import { toast } from "sonner";
 
@@ -18,6 +18,7 @@ interface AudioPlayerProps {
   onJumpToTime?: (jumpFunction: (time: number) => void) => void;
   onPlaybackStateChange?: (isPlaying: boolean) => void;
   initialVolume?: number;
+  onSegmentBoundaryReached?: (time: number) => void;
 }
 
 type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'seeking' | 'error';
@@ -28,6 +29,7 @@ export function AudioPlayer({
   onTimeUpdate,
   onJumpToTime,
   onPlaybackStateChange,
+  onSegmentBoundaryReached,
   initialVolume = 0.8
 }: AudioPlayerProps) {
   // State management
@@ -43,106 +45,19 @@ export function AudioPlayer({
   const timeUpdateLockRef = useRef(false);
   const seekingRef = useRef(false);
   const playAttemptTimeoutRef = useRef<number | null>(null);
-  const stateCheckIntervalRef = useRef<number | null>(null);
   const lastTimeUpdateRef = useRef<number>(0);
   const playRequestPendingRef = useRef(false);
   const lastKnownTimeRef = useRef(0);
   const userInteractingRef = useRef(false);
-  const minPlayDurationTimeoutRef = useRef<number | null>(null);
-  const segmentJumpTimeRef = useRef<number>(0);
   
-  // Clean up function for all timeouts and intervals
+  // Clean up function for all timeouts
   const clearAllTimeouts = useCallback(() => {
     if (playAttemptTimeoutRef.current) {
       window.clearTimeout(playAttemptTimeoutRef.current);
       playAttemptTimeoutRef.current = null;
     }
-    
-    if (stateCheckIntervalRef.current) {
-      window.clearInterval(stateCheckIntervalRef.current);
-      stateCheckIntervalRef.current = null;
-    }
-    
-    if (minPlayDurationTimeoutRef.current) {
-      window.clearTimeout(minPlayDurationTimeoutRef.current);
-      minPlayDurationTimeoutRef.current = null;
-    }
   }, []);
   
-  // Function to check for and recover from common playback issues
-  const checkAndRecoverPlayback = useCallback(() => {
-    if (!audioRef.current) return;
-    
-    const now = Date.now();
-    const timeSinceLastUpdate = now - lastTimeUpdateRef.current;
-    const audio = audioRef.current;
-    
-    // Check if we think we're playing but haven't had timeupdate events
-    if (isPlaying && !seekingRef.current && timeSinceLastUpdate > 1000) {
-      // Check if audio is actually playing or if it's stalled
-      if (!audio.paused && audio.currentTime > 0 && audio.readyState >= 3) {
-        // Audio should be playing, but no time updates - might be stalled
-        console.log('Potential stall detected - time updates stopped while playing');
-        
-        // Don't reset to 0 - preserve last known position
-        if (Math.abs(audio.currentTime - lastKnownTimeRef.current) > 2) {
-          // Only update if the difference is significant to avoid constant resets
-          audio.currentTime = Math.max(currentTime, lastKnownTimeRef.current);
-        }
-        
-        // Force a time update to at least show the correct position
-        setCurrentTime(audio.currentTime);
-        lastKnownTimeRef.current = audio.currentTime;
-        lastTimeUpdateRef.current = now;
-      } else if (audio.paused && playbackState === 'playing') {
-        // We think we're playing but the audio is paused - try to recover
-        console.log('State mismatch: UI shows playing but audio is paused');
-        
-        // If user isn't interacting, try to recover by toggling state
-        if (!userInteractingRef.current && !seekingRef.current && !playRequestPendingRef.current) {
-          setPlaybackState('paused');
-          setIsPlaying(false);
-        }
-      }
-    } else if (!isPlaying && !audio.paused && playbackState !== 'seeking') {
-      // We think we're paused but the audio is playing
-      console.log('State mismatch: UI shows paused but audio is playing');
-      
-      // If user isn't interacting, recover by updating the UI state
-      if (!userInteractingRef.current && !seekingRef.current) {
-        setPlaybackState('playing');
-        setIsPlaying(true);
-      }
-    }
-    
-    // Handle the case where time got reset to 0 incorrectly
-    if (audio.currentTime === 0 && lastKnownTimeRef.current > 0 && !userInteractingRef.current) {
-      // Check if we're within minimum play duration time after a segment jump
-      const timeSinceSegmentJump = now - segmentJumpTimeRef.current;
-      
-      // We've modified this to be more strict about when to reset
-      // Only restore position if ALL these conditions are met:
-      // 1. The audio isn't ended (real end of file)
-      // 2. We're not in seeking state
-      // 3. User isn't manually interacting
-      // 4. We're outside the minimum segment playback duration (to prevent early resets)
-      // 5. The last known time is significant (more than 1 second)
-      const isWithinMinPlayDuration = segmentJumpTimeRef.current > 0 && 
-                                    timeSinceSegmentJump < (SYNC_CONFIG.minSegmentPlaybackDuration * 1000);
-                                    
-      if (!audio.ended && 
-          playbackState !== 'seeking' && 
-          !seekingRef.current && 
-          !userInteractingRef.current && 
-          !isWithinMinPlayDuration && 
-          lastKnownTimeRef.current > 1) {
-        console.log('Preventing reset to 0: Restoring position from last known time:', lastKnownTimeRef.current);
-        audio.currentTime = lastKnownTimeRef.current;
-        setCurrentTime(lastKnownTimeRef.current);
-      }
-    }
-  }, [isPlaying, playbackState, currentTime]);
-
   // Handle play/pause
   const togglePlayPause = useCallback(() => {
     if (!audioRef.current) return;
@@ -156,9 +71,6 @@ export function AudioPlayer({
         setPlaybackState('paused');
         setIsPlaying(false);
       } else {
-        // Don't reset current time when playing - keep the current position
-        lastKnownTimeRef.current = audioRef.current.currentTime;
-        
         // Set a flag that we're trying to play
         playRequestPendingRef.current = true;
         
@@ -227,6 +139,20 @@ export function AudioPlayer({
     }
   }, [isPlaying]);
 
+  // Method to explicitly pause the audio
+  const pauseAudio = useCallback(() => {
+    if (!audioRef.current || !isPlaying) return;
+    
+    console.log("Explicitly pausing audio at:", audioRef.current.currentTime);
+    audioRef.current.pause();
+    setIsPlaying(false);
+    setPlaybackState('paused');
+    
+    if (onPlaybackStateChange) {
+      onPlaybackStateChange(false);
+    }
+  }, [isPlaying, onPlaybackStateChange]);
+
   // Skip forward/backward helpers
   const skipForward = useCallback(() => {
     if (!audioRef.current) return;
@@ -254,7 +180,7 @@ export function AudioPlayer({
     }, 300);
   }, []);
 
-  // Update time handler with lock to prevent feedback loops
+  // Update time handler
   const handleTimeUpdate = useCallback(() => {
     if (!audioRef.current || timeUpdateLockRef.current) return;
     
@@ -263,16 +189,12 @@ export function AudioPlayer({
     
     // Update last known good time
     lastTimeUpdateRef.current = Date.now();
-    
-    // Update the last known time but avoid 0 if we have a better value
-    if (currentTimeValue > 0 || lastKnownTimeRef.current === 0) {
-      lastKnownTimeRef.current = currentTimeValue;
-    }
+    lastKnownTimeRef.current = currentTimeValue;
     
     // Update the UI display
     setCurrentTime(currentTimeValue);
     
-    // Notify external components if needed
+    // Notify external components
     if (onTimeUpdate && !seekingRef.current && !userInteractingRef.current) {
       onTimeUpdate(currentTimeValue);
     }
@@ -363,8 +285,13 @@ export function AudioPlayer({
       if (onTimeUpdate) {
         onTimeUpdate(time);
       }
+      
+      // Check if we need to notify about segment boundary
+      if (onSegmentBoundaryReached) {
+        onSegmentBoundaryReached(time);
+      }
     }, 200);
-  }, [isPlaying, onTimeUpdate]);
+  }, [isPlaying, onTimeUpdate, onSegmentBoundaryReached]);
 
   // Handle seeking events from the audio element
   const handleSeeking = useCallback(() => {
@@ -416,36 +343,21 @@ export function AudioPlayer({
     // Update UI immediately for feedback
     setCurrentTime(time);
     lastKnownTimeRef.current = time;
-    segmentJumpTimeRef.current = Date.now();
     
     // Set the new time in the audio element
     const boundedTime = Math.max(0, Math.min(time, audioRef.current.duration || 0));
     audioRef.current.currentTime = boundedTime;
     
-    // If we were playing, continue playing
-    const wasPlaying = isPlaying;
-    
-    // Clear any existing minimum play duration timeout
-    if (minPlayDurationTimeoutRef.current) {
-      window.clearTimeout(minPlayDurationTimeoutRef.current);
-    }
-    
-    // Set a timeout to enforce minimum playback duration for a segment
-    // This is crucial for preventing early resets
-    minPlayDurationTimeoutRef.current = window.setTimeout(() => {
-      console.log(`Minimum segment playback duration (${SYNC_CONFIG.minSegmentPlaybackDuration}s) completed`);
-      minPlayDurationTimeoutRef.current = null;
-    }, SYNC_CONFIG.minSegmentPlaybackDuration * 1000);
-    
+    // Set a timeout to clear the seeking flags
     setTimeout(() => {
       seekingRef.current = false;
       timeUpdateLockRef.current = false;
       userInteractingRef.current = false;
       
       // Update playback state based on previous state
-      setPlaybackState(wasPlaying ? 'playing' : 'paused');
+      setPlaybackState(isPlaying ? 'playing' : 'paused');
       
-      if (wasPlaying && audioRef.current && audioRef.current.paused) {
+      if (isPlaying && audioRef.current && audioRef.current.paused) {
         const playPromise = audioRef.current.play();
         
         if (playPromise !== undefined) {
@@ -456,8 +368,18 @@ export function AudioPlayer({
           });
         }
       }
+      
+      // Notify about time update
+      if (onTimeUpdate) {
+        onTimeUpdate(boundedTime);
+      }
+      
+      // Check if we need to notify about segment boundary
+      if (onSegmentBoundaryReached) {
+        onSegmentBoundaryReached(boundedTime);
+      }
     }, 300);
-  }, [isPlaying]);
+  }, [isPlaying, onTimeUpdate, onSegmentBoundaryReached]);
 
   // Handle volume change
   const handleVolumeChange = useCallback((value: number[]) => {
@@ -500,26 +422,12 @@ export function AudioPlayer({
     if (!onJumpToTime) return;
     
     // Call the provided callback with our jump handler
-    onJumpToTime(jumpToTime);
+    onJumpToTime((time: number) => {
+      jumpToTime(time);
+    });
     
     return () => {}; 
   }, [onJumpToTime, jumpToTime]);
-
-  // Effect to set up continuous state checking for reliability
-  useEffect(() => {
-    // Start a periodic check for state consistency
-    // IMPORTANT FIX: Reduced frequency from 1000ms to 2000ms to decrease console spam
-    stateCheckIntervalRef.current = window.setInterval(() => {
-      checkAndRecoverPlayback();
-    }, 2000);
-    
-    return () => {
-      if (stateCheckIntervalRef.current) {
-        window.clearInterval(stateCheckIntervalRef.current);
-        stateCheckIntervalRef.current = null;
-      }
-    };
-  }, [checkAndRecoverPlayback]);
 
   // Effect to handle audio element events
   useEffect(() => {
@@ -554,7 +462,6 @@ export function AudioPlayer({
       setPlaybackState('paused');
       
       // When audio ends, the currentTime is at the end
-      // We want to preserve this, not reset to 0
       lastKnownTimeRef.current = audioEl.duration || 0;
     };
     
@@ -562,35 +469,6 @@ export function AudioPlayer({
       // Only show loading if we're currently playing
       if (isPlaying) {
         setPlaybackState('loading');
-      }
-    };
-    
-    const handleStalled = () => {
-      console.log("Audio stalled");
-      
-      // Check if we think we're playing but audio is actually stalled
-      if (isPlaying) {
-        // Don't stop playback yet, but update state
-        setPlaybackState('loading');
-        
-        // Try to recover after a timeout if still stalled
-        setTimeout(() => {
-          if (audioEl && audioEl.paused && isPlaying) {
-            console.log("Attempting to recover from stall");
-            
-            // Try to resume from last known position
-            audioEl.currentTime = lastKnownTimeRef.current;
-            
-            const playPromise = audioEl.play();
-            if (playPromise !== undefined) {
-              playPromise.catch(error => {
-                console.error("Recovery from stall failed:", error);
-                setIsPlaying(false);
-                setPlaybackState('paused');
-              });
-            }
-          }
-        }, 2000);
       }
     };
     
@@ -609,7 +487,6 @@ export function AudioPlayer({
     audioEl.addEventListener('pause', handlePause);
     audioEl.addEventListener('ended', handleEnded);
     audioEl.addEventListener('waiting', handleWaiting);
-    audioEl.addEventListener('stalled', handleStalled);
     audioEl.addEventListener('canplay', handleCanPlay);
     audioEl.addEventListener('error', handleError);
     
@@ -620,7 +497,6 @@ export function AudioPlayer({
       audioEl.removeEventListener('pause', handlePause);
       audioEl.removeEventListener('ended', handleEnded);
       audioEl.removeEventListener('waiting', handleWaiting);
-      audioEl.removeEventListener('stalled', handleStalled);
       audioEl.removeEventListener('canplay', handleCanPlay);
       audioEl.removeEventListener('error', handleError);
       clearAllTimeouts();
@@ -633,6 +509,30 @@ export function AudioPlayer({
     : volume < 0.5 
       ? Volume1 
       : Volume2;
+
+  // Expose methods to parent component
+  // This is a new addition to control audio from parent
+  useEffect(() => {
+    // Nothing to expose if there's no onSegmentBoundaryReached handler
+    if (!onSegmentBoundaryReached) return;
+    
+    // We expose the pauseAudio method to the parent via a ref
+    if (window) {
+      // @ts-ignore - we're adding a custom property for easier access
+      window.__audioPlayerControls = {
+        pauseAudio,
+        jumpToTime
+      };
+    }
+    
+    return () => {
+      // Clean up
+      if (window) {
+        // @ts-ignore
+        delete window.__audioPlayerControls;
+      }
+    };
+  }, [pauseAudio, jumpToTime, onSegmentBoundaryReached]);
 
   // Render the audio player UI
   return (

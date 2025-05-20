@@ -10,7 +10,7 @@ import { LexicalEditor } from "@/components/editor/LexicalEditor";
 import { AudioPlayer } from "@/components/editor/AudioPlayer";
 import { ExportOptions } from "@/components/editor/ExportOptions";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
-import { formatTimestamp } from "@/utils/audioSyncUtils";
+import { formatTimestamp, findSegmentAtTime, hasReachedSegmentEnd, TranscriptSegment } from "@/utils/audioSyncUtils";
 import { useSubscription } from "@/context/SubscriptionContext";
 
 interface TranscriptionDisplayProps {
@@ -65,7 +65,7 @@ const TranscriptionDisplay = ({
   const [editorReady, setEditorReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [jumpToTimeHandler, setJumpToTimeHandler] = useState<((time: number) => void) | null>(null);
-  const [segmentJumpInProgress, setSegmentJumpInProgress] = useState(false);
+  const [currentSegment, setCurrentSegment] = useState<TranscriptSegment | null>(null);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
@@ -88,11 +88,47 @@ const TranscriptionDisplay = ({
     // Handle editor changes if needed
   };
 
+  // Handle segment boundary reached
+  const handleSegmentBoundaryReached = useCallback((time: number) => {
+    // If we don't have segments or the player isn't playing, just return
+    if (!segments.length || !isPlaying) return;
+    
+    // Find current segment
+    const segment = findSegmentAtTime(time, segments);
+    
+    // If we have a current segment and we've reached its end, pause playback
+    if (segment && hasReachedSegmentEnd(time, segment)) {
+      console.log(`Reached end of segment at ${time}s (segment ends at ${segment.end}s)`);
+      
+      // Use the audio player controls to pause
+      if (window && (window as any).__audioPlayerControls) {
+        console.log("Pausing at segment boundary");
+        (window as any).__audioPlayerControls.pauseAudio();
+      }
+    }
+  }, [segments, isPlaying]);
+
   // Handle time updates from the audio player
   const handleTimeUpdate = useCallback((time: number) => {
-    console.log(`Time updated: ${time}s`);
     setCurrentTime(time);
-  }, []);
+    
+    // Find the current segment at this time
+    if (segments.length > 0) {
+      const segment = findSegmentAtTime(time, segments);
+      
+      // Only update if different to avoid unnecessary re-renders
+      if (segment && (!currentSegment || segment.start !== currentSegment.start)) {
+        setCurrentSegment(segment);
+      } else if (!segment && currentSegment) {
+        setCurrentSegment(null);
+      }
+      
+      // Check if we've reached a segment boundary
+      if (segment && hasReachedSegmentEnd(time, segment)) {
+        handleSegmentBoundaryReached(time);
+      }
+    }
+  }, [segments, currentSegment, handleSegmentBoundaryReached]);
 
   // Set up the jump to time handler that will be passed to the editor
   const handleJumpToTimeSetup = useCallback((jumpHandler: (time: number) => void) => {
@@ -104,17 +140,8 @@ const TranscriptionDisplay = ({
   const handleSegmentClick = useCallback((time: number) => {
     console.log(`Segment clicked, jumping to time: ${time}s`);
     
-    // Set a flag to indicate we're handling a segment jump
-    setSegmentJumpInProgress(true);
-    
-    // Debounce multiple rapid clicks
     if (jumpToTimeHandler) {
       jumpToTimeHandler(time);
-      
-      // Reset the segment jump flag after a delay
-      setTimeout(() => {
-        setSegmentJumpInProgress(false);
-      }, 500);
     }
   }, [jumpToTimeHandler]);
 
@@ -191,6 +218,7 @@ const TranscriptionDisplay = ({
               onTimeUpdate={handleTimeUpdate} 
               onJumpToTime={handleJumpToTimeSetup}
               onPlaybackStateChange={handlePlaybackStateChange}
+              onSegmentBoundaryReached={handleSegmentBoundaryReached}
             />
           </div>
         )}

@@ -1,27 +1,22 @@
+
 /**
  * Utility functions for audio and transcript synchronization
  */
 
 // Configuration settings for synchronization behavior
 export const SYNC_CONFIG = {
-  // Buffer time (in seconds) to add after each segment's end time
-  // This prevents abrupt cutoffs and allows smoother transitions
-  // Increased from 8 to 12 seconds for better listening experience
-  segmentEndBuffer: 12,
+  // How much extra time (in seconds) to play past a segment's end time
+  // before pausing (useful for natural-sounding pauses)
+  segmentEndBuffer: 2,
   
   // Minimum segment duration (in seconds) to prevent very short segments
-  // Increased from 2 to 4 seconds to ensure minimal playback time
-  minSegmentDuration: 4,
+  minSegmentDuration: 2,
   
   // Debounce time for scroll operations (in milliseconds)
   scrollDebounce: 200,
   
   // How close to the segment boundary (in seconds) we should be before preparing for transition
-  transitionThreshold: 1.5,
-  
-  // Minimum time (in seconds) to stay on a segment after clicking
-  // Increased from 3 to 8 seconds to prevent early resets
-  minSegmentPlaybackDuration: 8
+  transitionThreshold: 1.5
 };
 
 /**
@@ -51,6 +46,20 @@ export const isTimeInSegment = (
     : segment.end;
     
   return time >= segment.start && time <= endTime;
+};
+
+/**
+ * Check if a time has reached or exceeded a segment's end time
+ * 
+ * @param time - Current playback time in seconds
+ * @param segment - Segment to check against
+ * @returns boolean indicating if time has reached/passed the segment end
+ */
+export const hasReachedSegmentEnd = (
+  time: number,
+  segment: TranscriptSegment
+): boolean => {
+  return time >= segment.end;
 };
 
 /**
