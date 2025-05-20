@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { $getRoot } from "lexical";
 import { toast } from "sonner";
+import { SYNC_CONFIG } from "@/utils/audioSyncUtils";
 
 interface TranscriptSegmentHandlerProps {
   onSegmentClick?: (time: number) => void;
@@ -11,6 +12,8 @@ interface TranscriptSegmentHandlerProps {
 export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHandlerProps) {
   const [editor] = useLexicalComposerContext();
   const clickHandlersSetupRef = useRef(false);
+  const lastClickTimeRef = useRef(0);
+  const lastClickPositionRef = useRef(-1);
   
   // Set up click handler for paragraphs with timestamps
   const setupClickHandlers = useCallback(() => {
@@ -44,6 +47,17 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
                 // Don't trigger if the user is selecting text
                 if (window.getSelection()?.toString()) return;
                 
+                // Prevent double-clicks or rapid clicks (debounce)
+                const now = Date.now();
+                if (now - lastClickTimeRef.current < 500 && start === lastClickPositionRef.current) {
+                  console.log("Ignoring rapid repeated click on same segment");
+                  return;
+                }
+                
+                // Update our tracking refs
+                lastClickTimeRef.current = now;
+                lastClickPositionRef.current = start;
+                
                 console.log(`Segment clicked with time: ${start}s`);
                 
                 // Call the callback with the start time
@@ -54,7 +68,7 @@ export function TranscriptSegmentHandler({ onSegmentClick }: TranscriptSegmentHa
                   // Add a small delay to ensure proper event handling
                   setTimeout(() => {
                     onSegmentClick(start);
-                  }, 10);
+                  }, 50);
                 }
                 
                 // Show visual feedback

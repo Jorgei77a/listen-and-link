@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -49,6 +48,8 @@ export function AudioPlayer({
   const playRequestPendingRef = useRef(false);
   const lastKnownTimeRef = useRef(0);
   const userInteractingRef = useRef(false);
+  const minPlayDurationTimeoutRef = useRef<number | null>(null);
+  const segmentJumpTimeRef = useRef<number>(0);
   
   // Clean up function for all timeouts and intervals
   const clearAllTimeouts = useCallback(() => {
@@ -60,6 +61,11 @@ export function AudioPlayer({
     if (stateCheckIntervalRef.current) {
       window.clearInterval(stateCheckIntervalRef.current);
       stateCheckIntervalRef.current = null;
+    }
+    
+    if (minPlayDurationTimeoutRef.current) {
+      window.clearTimeout(minPlayDurationTimeoutRef.current);
+      minPlayDurationTimeoutRef.current = null;
     }
   }, []);
   
@@ -111,8 +117,14 @@ export function AudioPlayer({
     
     // Handle the case where time got reset to 0 incorrectly
     if (audio.currentTime === 0 && lastKnownTimeRef.current > 0 && !userInteractingRef.current) {
+      // Check if we're within minimum play duration time after a segment jump
+      const timeSinceSegmentJump = now - segmentJumpTimeRef.current;
+      const isWithinMinPlayDuration = segmentJumpTimeRef.current > 0 && 
+                                    timeSinceSegmentJump < SYNC_CONFIG.minSegmentPlaybackDuration * 1000;
+                                    
       // Only restore if this wasn't due to reaching the end or user interaction
-      if (!audio.ended && playbackState !== 'seeking' && !seekingRef.current && !userInteractingRef.current) {
+      if (!audio.ended && playbackState !== 'seeking' && !seekingRef.current && 
+          !userInteractingRef.current && !isWithinMinPlayDuration) {
         console.log('Restoring position from last known time:', lastKnownTimeRef.current);
         audio.currentTime = lastKnownTimeRef.current;
         setCurrentTime(lastKnownTimeRef.current);
@@ -240,7 +252,11 @@ export function AudioPlayer({
     
     // Update last known good time
     lastTimeUpdateRef.current = Date.now();
-    lastKnownTimeRef.current = currentTimeValue;
+    
+    // Update the last known time but avoid 0 if we have a better value
+    if (currentTimeValue > 0 || lastKnownTimeRef.current === 0) {
+      lastKnownTimeRef.current = currentTimeValue;
+    }
     
     // Update the UI display
     setCurrentTime(currentTimeValue);
@@ -389,6 +405,7 @@ export function AudioPlayer({
     // Update UI immediately for feedback
     setCurrentTime(time);
     lastKnownTimeRef.current = time;
+    segmentJumpTimeRef.current = Date.now();
     
     // Set the new time in the audio element
     const boundedTime = Math.max(0, Math.min(time, audioRef.current.duration || 0));
@@ -396,6 +413,17 @@ export function AudioPlayer({
     
     // If we were playing, continue playing
     const wasPlaying = isPlaying;
+    
+    // Clear any existing minimum play duration timeout
+    if (minPlayDurationTimeoutRef.current) {
+      window.clearTimeout(minPlayDurationTimeoutRef.current);
+    }
+    
+    // Set a timeout to enforce minimum playback duration for a segment
+    minPlayDurationTimeoutRef.current = window.setTimeout(() => {
+      console.log(`Minimum segment playback duration (${SYNC_CONFIG.minSegmentPlaybackDuration}s) completed`);
+      minPlayDurationTimeoutRef.current = null;
+    }, SYNC_CONFIG.minSegmentPlaybackDuration * 1000);
     
     setTimeout(() => {
       seekingRef.current = false;

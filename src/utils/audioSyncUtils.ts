@@ -1,4 +1,3 @@
-
 /**
  * Utility functions for audio and transcript synchronization
  */
@@ -7,16 +6,21 @@
 export const SYNC_CONFIG = {
   // Buffer time (in seconds) to add after each segment's end time
   // This prevents abrupt cutoffs and allows smoother transitions
-  segmentEndBuffer: 5,
+  // Increased from 5 to 8 seconds for better listening experience
+  segmentEndBuffer: 8,
   
   // Minimum segment duration (in seconds) to prevent very short segments
-  minSegmentDuration: 1,
+  // Increased from 1 to 2 seconds to ensure minimal playback time
+  minSegmentDuration: 2,
   
   // Debounce time for scroll operations (in milliseconds)
   scrollDebounce: 200,
   
   // How close to the segment boundary (in seconds) we should be before preparing for transition
-  transitionThreshold: 1.5
+  transitionThreshold: 1.5,
+  
+  // Minimum time (in seconds) to stay on a segment after clicking
+  minSegmentPlaybackDuration: 3
 };
 
 /**

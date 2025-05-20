@@ -65,6 +65,7 @@ const TranscriptionDisplay = ({
   const [editorReady, setEditorReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [jumpToTimeHandler, setJumpToTimeHandler] = useState<((time: number) => void) | null>(null);
+  const [segmentJumpInProgress, setSegmentJumpInProgress] = useState(false);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
@@ -94,7 +95,6 @@ const TranscriptionDisplay = ({
   }, []);
 
   // Set up the jump to time handler that will be passed to the editor
-  // Updated to correctly handle the function signature
   const handleJumpToTimeSetup = useCallback((jumpHandler: (time: number) => void) => {
     console.log("Jump to time handler set up");
     setJumpToTimeHandler(() => jumpHandler);
@@ -103,8 +103,18 @@ const TranscriptionDisplay = ({
   // Handle segment click from transcript
   const handleSegmentClick = useCallback((time: number) => {
     console.log(`Segment clicked, jumping to time: ${time}s`);
+    
+    // Set a flag to indicate we're handling a segment jump
+    setSegmentJumpInProgress(true);
+    
+    // Debounce multiple rapid clicks
     if (jumpToTimeHandler) {
       jumpToTimeHandler(time);
+      
+      // Reset the segment jump flag after a delay
+      setTimeout(() => {
+        setSegmentJumpInProgress(false);
+      }, 500);
     }
   }, [jumpToTimeHandler]);
 
