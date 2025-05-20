@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
@@ -27,6 +27,7 @@ interface TranscriptEditorProps {
 const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorProps) => {
   const [isMounted, setIsMounted] = useState(false)
   const [initialContent] = useState(content) // Store initial content to prevent re-initialization
+  const [isEditorFocused, setIsEditorFocused] = useState(false)
   const editorRef = useRef<HTMLDivElement>(null)
   
   const editor = useEditor({
@@ -54,6 +55,12 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
       if (onChange) {
         onChange(editor.getHTML())
       }
+    },
+    onFocus: () => {
+      setIsEditorFocused(true)
+    },
+    onBlur: () => {
+      setIsEditorFocused(false)
     },
     autofocus: 'end', // Focus at the end of content
   })
@@ -123,9 +130,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
   // Explicitly focus editor after mount
   useEffect(() => {
     if (editor && isMounted && !editor.isDestroyed) {
-      setTimeout(() => {
-        editor.commands.focus('end')
-      }, 100)
+      editor.commands.focus('end')
     }
   }, [editor, isMounted])
 
@@ -138,38 +143,38 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
     }
   }, [editor, initialContent]) // Removed content from dependency array to prevent re-updates
 
-  // Ensure we focus editor when clicking on its container 
-  const handleContainerClick = () => {
-    if (editor && !editor.isDestroyed) {
+  // Direct command executor function that ensures focus first
+  const executeCommand = useCallback((command: () => boolean) => {
+    if (!editor || editor.isDestroyed) return
+    
+    // First focus the editor if it's not already focused
+    if (!isEditorFocused) {
       editor.commands.focus()
     }
-  }
+    
+    // Execute the command immediately
+    command()
+  }, [editor, isEditorFocused])
 
-  // Fixed MenuButton component that ensures the editor is focused before each command
+  // Simplified toolbar button component that directly executes commands
   const MenuButton = ({ 
-    onClick, 
+    command, 
     active = false,
     disabled = false,
     tooltip,
     children 
   }: { 
-    onClick: () => void, 
+    command: () => void, 
     active?: boolean, 
     disabled?: boolean,
     tooltip?: string,
     children: React.ReactNode 
   }) => {
-    // Ensure focus is explicitly set before applying any formatting commands
-    const handleButtonClick = () => {
-      if (editor && !editor.isDestroyed) {
-        // First force focus the editor
-        editor.commands.focus()
-        
-        // Then execute the command with a small delay to ensure focus is applied
-        setTimeout(() => {
-          onClick()
-        }, 10)
-      }
+    const handleClick = (e: React.MouseEvent) => {
+      // Stop propagation to prevent editor from losing focus
+      e.stopPropagation()
+      e.preventDefault()
+      command()
     }
     
     if (tooltip) {
@@ -179,7 +184,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
             <Button
               variant="ghost"
               size="icon"
-              onClick={handleButtonClick}
+              onClick={handleClick}
               disabled={disabled}
               className={cn(
                 'h-8 w-8 p-0',
@@ -200,7 +205,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
       <Button
         variant="ghost"
         size="icon"
-        onClick={handleButtonClick}
+        onClick={handleClick}
         disabled={disabled}
         className={cn(
           'h-8 w-8 p-0',
@@ -210,6 +215,13 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
         {children}
       </Button>
     )
+  }
+
+  // Handle click anywhere in the editor container
+  const handleContainerClick = () => {
+    if (editor && !editor.isDestroyed && !isEditorFocused) {
+      editor.commands.focus()
+    }
   }
 
   if (!isMounted) {
@@ -225,7 +237,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
       {editor && (
         <div className="border-b p-1 flex flex-wrap gap-0.5 bg-muted/30">
           <MenuButton 
-            onClick={() => editor.chain().toggleBold().run()}
+            command={() => executeCommand(() => editor.chain().toggleBold().run())}
             active={editor.isActive('bold')}
             tooltip="Bold (applies to selected text)"
           >
@@ -233,7 +245,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           </MenuButton>
           
           <MenuButton 
-            onClick={() => editor.chain().toggleItalic().run()}
+            command={() => executeCommand(() => editor.chain().toggleItalic().run())}
             active={editor.isActive('italic')}
             tooltip="Italic (applies to selected text)"
           >
@@ -241,7 +253,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           </MenuButton>
           
           <MenuButton 
-            onClick={() => editor.chain().toggleUnderline().run()}
+            command={() => executeCommand(() => editor.chain().toggleUnderline().run())}
             active={editor.isActive('underline')}
             tooltip="Underline (applies to selected text)"
           >
@@ -251,7 +263,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           <div className="w-px h-full mx-1 bg-border" />
           
           <MenuButton 
-            onClick={() => editor.chain().toggleHeading({ level: 1 }).run()}
+            command={() => executeCommand(() => editor.chain().toggleHeading({ level: 1 }).run())}
             active={editor.isActive('heading', { level: 1 })}
             tooltip="Heading 1 (applies to current paragraph)"
           >
@@ -259,7 +271,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           </MenuButton>
           
           <MenuButton 
-            onClick={() => editor.chain().toggleHeading({ level: 2 }).run()}
+            command={() => executeCommand(() => editor.chain().toggleHeading({ level: 2 }).run())}
             active={editor.isActive('heading', { level: 2 })}
             tooltip="Heading 2 (applies to current paragraph)"
           >
@@ -267,7 +279,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           </MenuButton>
           
           <MenuButton 
-            onClick={() => editor.chain().toggleHeading({ level: 3 }).run()}
+            command={() => executeCommand(() => editor.chain().toggleHeading({ level: 3 }).run())}
             active={editor.isActive('heading', { level: 3 })}
             tooltip="Heading 3 (applies to current paragraph)"
           >
@@ -277,7 +289,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           <div className="w-px h-full mx-1 bg-border" />
           
           <MenuButton 
-            onClick={() => editor.chain().toggleBulletList().run()}
+            command={() => executeCommand(() => editor.chain().toggleBulletList().run())}
             active={editor.isActive('bulletList')}
             tooltip="Bullet List (applies to current paragraph)"
           >
@@ -287,7 +299,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           <div className="w-px h-full mx-1 bg-border" />
           
           <MenuButton 
-            onClick={() => editor.commands.undo()}
+            command={() => executeCommand(() => editor.commands.undo())}
             disabled={!editor.can().undo()}
             tooltip="Undo"
           >
@@ -295,7 +307,7 @@ const TranscriptEditor = ({ content, onChange, onTextClick }: TranscriptEditorPr
           </MenuButton>
           
           <MenuButton 
-            onClick={() => editor.commands.redo()}
+            command={() => executeCommand(() => editor.commands.redo())}
             disabled={!editor.can().redo()}
             tooltip="Redo"
           >
