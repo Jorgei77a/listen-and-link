@@ -123,6 +123,7 @@ export const DEFAULT_SEGMENT_BUFFERS = {
 
 /**
  * Check if a time is within a segment's bounds, accounting for buffer time
+ * IMPORTANT: This function is for UI highlighting ONLY and should not affect playback
  */
 export const isTimeInSegment = (
   time: number, 
@@ -135,6 +136,7 @@ export const isTimeInSegment = (
 
 /**
  * Find the active segment given the current time and a list of segments
+ * IMPORTANT: This function is for UI highlighting ONLY and should not affect playback
  */
 export const findActiveSegment = (
   currentTime: number,

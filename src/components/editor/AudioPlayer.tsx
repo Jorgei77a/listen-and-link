@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -39,6 +38,8 @@ export function AudioPlayer({
   const lastReportedTimeRef = useRef(-1);
   const updateLockRef = useRef(false);
   const audioLoadedRef = useRef(false);
+  const continuousPlayRef = useRef<boolean>(true); // Ensure continuous playback
+  const timeUpdateCallbackEnabledRef = useRef<boolean>(true); // Control callback triggering
   
   // Stabilize references when props change, but don't trigger effects
   useEffect(() => {
@@ -74,6 +75,9 @@ export function AudioPlayer({
       setIsBuffering(true);
     }
     
+    // Ensure continuous play
+    continuousPlayRef.current = true;
+    
     const playPromise = audioRef.current.play();
     if (playPromise !== undefined) {
       playPromise
@@ -85,6 +89,7 @@ export function AudioPlayer({
           if (error.name !== 'AbortError') {
             setIsPlaying(false);
             setIsBuffering(false);
+            console.error("Audio play error:", error);
           }
         });
     }
@@ -93,21 +98,43 @@ export function AudioPlayer({
   // Memoized skip functions
   const skipForward = useCallback(() => {
     if (audioRef.current && !updateLockRef.current) {
+      // First disable time update callbacks briefly to prevent feedback
+      timeUpdateCallbackEnabledRef.current = false;
+      
       const newTime = Math.min(audioRef.current.currentTime + 5, duration);
       jumpToTime(newTime);
+      
+      // Re-enable callbacks after a small delay
+      setTimeout(() => {
+        timeUpdateCallbackEnabledRef.current = true;
+      }, 300);
     }
   }, [duration]);
 
   const skipBackward = useCallback(() => {
     if (audioRef.current && !updateLockRef.current) {
+      // First disable time update callbacks briefly to prevent feedback
+      timeUpdateCallbackEnabledRef.current = false;
+      
       const newTime = Math.max(audioRef.current.currentTime - 5, 0);
       jumpToTime(newTime);
+      
+      // Re-enable callbacks after a small delay
+      setTimeout(() => {
+        timeUpdateCallbackEnabledRef.current = true;
+      }, 300);
     }
   }, []);
 
   // Revised jumpToTime function with better state management
   const jumpToTime = useCallback((time: number) => {
-    if (!audioRef.current || updateLockRef.current || !audioLoadedRef.current) return;
+    if (!audioRef.current || !audioLoadedRef.current) return;
+    
+    // Prevent jumps to 0 unless explicitly requested and significant
+    if (time < 0.1 && audioRef.current.currentTime > 1) {
+      console.warn("Prevented unexpected jump to position 0");
+      return;
+    }
     
     // Prevent triggering time updates while seeking or for small changes
     if (Math.abs(time - prevTimeRef.current) < 0.1) return;
@@ -128,12 +155,8 @@ export function AudioPlayer({
     setCurrentTime(time);
     
     // Store play state
-    playAfterSeekRef.current = isPlaying || audioRef.current.paused === false;
-    
-    // Pause first to avoid race conditions
-    if (!audioRef.current.paused) {
-      audioRef.current.pause();
-    }
+    const wasPlaying = isPlaying || audioRef.current.paused === false;
+    playAfterSeekRef.current = wasPlaying;
     
     // Set time without triggering unnecessary callbacks
     try {
@@ -145,23 +168,46 @@ export function AudioPlayer({
       return;
     }
     
+    // Temporarily disable time update callbacks
+    timeUpdateCallbackEnabledRef.current = false;
+    
     // Release update lock after a short delay
     setTimeout(() => {
       updateLockRef.current = false;
       
+      // Re-enable time update callbacks
+      setTimeout(() => {
+        timeUpdateCallbackEnabledRef.current = true;
+      }, 300);
+      
       // Only call external updates if the time has changed enough
       if (onTimeUpdateRef.current && Math.abs(time - lastReportedTimeRef.current) > 0.1) {
         lastReportedTimeRef.current = time;
-        onTimeUpdateRef.current(time);
+        
+        setTimeout(() => {
+          if (onTimeUpdateRef.current) {
+            onTimeUpdateRef.current(time);
+          }
+        }, 50);
       }
-    }, 50);
+    }, 100);
   }, [isPlaying]);
 
   // Throttled time update handling
   const handleTimeUpdate = useCallback(() => {
-    if (!audioRef.current || timeUpdateThrottleRef.current || updateLockRef.current) return;
+    if (!audioRef.current || updateLockRef.current) return;
+    
+    // Prevent audio reset to position 0 unless we've actually reached the end
+    if (audioRef.current.currentTime < 0.1 && !audioRef.current.paused && 
+        prevTimeRef.current > 1 && audioRef.current.duration - prevTimeRef.current > 1) {
+      
+      console.warn("Detected unexpected reset to position 0, restoring position");
+      audioRef.current.currentTime = prevTimeRef.current;
+      return;
+    }
     
     const newTime = audioRef.current.currentTime;
+    prevTimeRef.current = newTime;
     
     // Debounce frequent updates
     if (Date.now() - lastTimeUpdateRef.current < 200) {
@@ -169,7 +215,6 @@ export function AudioPlayer({
         timeUpdateThrottleRef.current = true;
         setTimeout(() => {
           timeUpdateThrottleRef.current = false;
-          // Don't automatically call again to avoid loops
         }, 200);
       }
       return;
@@ -181,19 +226,13 @@ export function AudioPlayer({
     if (Math.abs(newTime - currentTime) > 0.2) {
       setCurrentTime(newTime);
       
-      // Only call external updates if seeking is not in progress
-      if (onTimeUpdateRef.current && !seekOperationInProgressRef.current && 
-          !updateLockRef.current && Math.abs(newTime - lastReportedTimeRef.current) > 0.2) {
-        updateLockRef.current = true;
-        lastReportedTimeRef.current = newTime;
+      // Only call external updates if enabled and not seeking
+      if (timeUpdateCallbackEnabledRef.current && onTimeUpdateRef.current && 
+          !seekOperationInProgressRef.current && 
+          Math.abs(newTime - lastReportedTimeRef.current) > 0.2) {
         
-        // Delay to break potential loops
-        setTimeout(() => {
-          if (onTimeUpdateRef.current) {
-            onTimeUpdateRef.current(newTime);
-          }
-          updateLockRef.current = false;
-        }, 50);
+        lastReportedTimeRef.current = newTime;
+        onTimeUpdateRef.current(newTime);
       }
     }
   }, [currentTime]);
@@ -211,7 +250,15 @@ export function AudioPlayer({
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (updateLockRef.current) return;
     const time = parseFloat(e.target.value);
+    
+    // Temporarily disable time update callbacks
+    timeUpdateCallbackEnabledRef.current = false;
     jumpToTime(time);
+    
+    // Re-enable callbacks after a delay
+    setTimeout(() => {
+      timeUpdateCallbackEnabledRef.current = true;
+    }, 300);
   }, [jumpToTime]);
 
   // Memoized formatting function
@@ -257,13 +304,15 @@ export function AudioPlayer({
     setIsSeeking(false);
     setIsBuffering(false);
     
-    // Resume playback if needed
-    if (playAfterSeekRef.current && audioLoadedRef.current) {
+    // Always resume playback if it was playing before or continuous play is enabled
+    if ((playAfterSeekRef.current || continuousPlayRef.current) && audioLoadedRef.current) {
+      // Reset flag
+      playAfterSeekRef.current = false;
+      
       // Delayed resume to let browser catch up
       setTimeout(() => {
-        if (audioRef.current) {
+        if (audioRef.current && audioLoadedRef.current) {
           playAudio();
-          playAfterSeekRef.current = false;
         }
       }, 100);
     }
@@ -282,6 +331,13 @@ export function AudioPlayer({
 
   const handleEnded = useCallback(() => {
     setIsPlaying(false);
+    
+    // Only send time update when actually ended
+    if (onTimeUpdateRef.current && audioRef.current) {
+      const finalTime = audioRef.current.duration;
+      lastReportedTimeRef.current = finalTime;
+      onTimeUpdateRef.current(finalTime);
+    }
   }, []);
 
   const handleError = useCallback((e: React.SyntheticEvent<HTMLAudioElement, Event>) => {
@@ -296,25 +352,37 @@ export function AudioPlayer({
   // Jump to time registration with proper cleanup
   useEffect(() => {
     if (onJumpToTime && audioRef.current) {
-      // Pass a stabilized version of jumpToTime
+      // Pass a stabilized version of jumpToTime that ensures playback continues
       const stableJumpToTimeCallback = (time: number) => {
         if (audioLoadedRef.current) {
+          // Temporarily disable time update callbacks
+          timeUpdateCallbackEnabledRef.current = false;
+          
+          // Set the continuous play flag to ensure playback continues
+          continuousPlayRef.current = true;
+          
+          // Remember if we were playing
+          playAfterSeekRef.current = isPlaying || !audioRef.current?.paused;
+          
+          // Jump to the requested time
           jumpToTime(time);
+          
+          // Re-enable callbacks after a delay
+          setTimeout(() => {
+            timeUpdateCallbackEnabledRef.current = true;
+          }, 300);
         }
       };
       
-      onJumpToTime(stableJumpToTimeCallback);
+      const cleanup = onJumpToTime(stableJumpToTimeCallback);
+      
+      return () => {
+        if (cleanup) cleanup();
+      };
     }
     
-    return () => {
-      // Cleanup to prevent memory leaks
-      lastTimeUpdateRef.current = 0;
-      timeUpdateThrottleRef.current = false;
-      seekOperationInProgressRef.current = false;
-      updateLockRef.current = false;
-      seekQueueRef.current = null;
-    };
-  }, [jumpToTime, onJumpToTime]);
+    return undefined;
+  }, [jumpToTime, onJumpToTime, isPlaying]);
 
   // Handle src changes with proper cleanup
   useEffect(() => {
@@ -330,7 +398,9 @@ export function AudioPlayer({
       lastReportedTimeRef.current = -1;
       lastTimeUpdateRef.current = 0;
       updateLockRef.current = false;
+      timeUpdateCallbackEnabledRef.current = true;
       audioLoadedRef.current = false;
+      continuousPlayRef.current = true;
       
       // Reset and reload audio
       if (audioRef.current) {

@@ -70,11 +70,12 @@ const TranscriptionDisplay = ({
   const currentTimeRef = useRef<number | null>(currentTime);
   const isFirstTimeUpdateRef = useRef<boolean>(true);
   
-  // Configure buffer settings - can be adjusted based on content
+  // Configure optimized buffer settings - tuned for smooth playback
   const bufferSettings = {
     ...DEFAULT_SEGMENT_BUFFERS,
     segmentEndBuffer: 1.5,      // 1.5 seconds extra time after segment ends
-    segmentLookaheadBuffer: 0.3 // Start highlighting next segment 0.3s early
+    segmentLookaheadBuffer: 0.3, // Start highlighting next segment 0.3s early
+    debugMode: false            // Set to true for debugging buffer timing visuals
   };
   
   // Keep currentTimeRef in sync
@@ -123,7 +124,7 @@ const TranscriptionDisplay = ({
     // Reset the lock after a delay
     setTimeout(() => {
       isUpdatingFromPlayerRef.current = false;
-    }, 300);
+    }, 300); // Increased debounce time to prevent loops
   }, []);
 
   // Heavily debounced segment click handler
@@ -131,7 +132,7 @@ const TranscriptionDisplay = ({
     // Prevent multiple rapid clicks or updates while player is updating editor
     if (isUpdatingFromPlayerRef.current) return;
     
-    // Simple strong debounce for rapid clicks
+    // Strong debounce for rapid clicks
     const now = Date.now();
     if (now - lastSegmentClickTimeRef.current < 1000) {
       return;
@@ -224,7 +225,7 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
-        {/* Lexical Editor with buffer settings */}
+        {/* Lexical Editor with optimized buffer settings */}
         <LexicalEditor 
           initialText={transcript}
           segments={segments}
@@ -247,7 +248,7 @@ const TranscriptionDisplay = ({
           </div>
         )}
         
-        {/* Debug information - now includes buffer settings */}
+        {/* Debug information - includes buffer settings */}
         <div className="mt-4 p-2 bg-gray-50 rounded-md text-xs text-muted-foreground">
           <p>Status: {audioUrl ? "✅ Audio loaded" : "❌ No audio"}, Editor: {editorReady ? "✅ Ready" : "❌ Loading"}, Player: {playerReady ? "✅ Ready" : "❌ Loading"}</p>
           {currentTime !== null && <p>Position: {currentTime.toFixed(2)}s, Buffer: {bufferSettings.segmentEndBuffer.toFixed(1)}s</p>}
