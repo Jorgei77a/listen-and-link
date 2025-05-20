@@ -34,77 +34,81 @@ const Index = () => {
     if (!currentTranscriptionId) return;
     
     const checkTranscription = async () => {
-      const { data, error } = await supabase
-        .from('transcriptions')
-        .select('*, audio_duration, segments, file_path')
-        .eq('id', currentTranscriptionId)
-        .single();
-      
-      if (error) {
-        console.error('Failed to fetch transcription:', error);
-        return;
-      }
-      
-      if (data) {
-        if (data.status === 'completed' && data.transcript) {
-          setTranscript(data.transcript);
-          setIsProcessing(false);
-          
-          // Store segments if available
-          if (data.segments) {
-            try {
-              let parsedSegments: TranscriptionSegment[] = [];
-              
-              if (typeof data.segments === 'string') {
-                parsedSegments = JSON.parse(data.segments);
-              } else if (Array.isArray(data.segments)) {
-                parsedSegments = data.segments;
-              }
-              
-              setSegments(parsedSegments);
-            } catch (error) {
-              console.error('Failed to parse segments:', error);
-            }
-          }
-          
-          // Create signed URL for the audio file
-          if (data.file_path) {
-            const { data: signedUrl } = await supabase.storage
-              .from('audio_files')
-              .createSignedUrl(data.file_path, 3600); // 1 hour expiry
-              
-            if (signedUrl?.signedUrl) {
-              setAudioUrl(signedUrl.signedUrl);
-            }
-          }
-          
-          // Store the audio duration - make sure to round it here
-          if (data.audio_duration) {
-            // Round to nearest integer to ensure no decimal places
-            const roundedDuration = Math.round(Number(data.audio_duration));
-            setAudioDuration(roundedDuration);
-            
-            // Update monthly usage with the actual audio duration from the server
-            try {
-              await updateMonthlyUsage(roundedDuration);
-              console.log(`Updated usage with confirmed duration: ${roundedDuration}s`);
-            } catch (error) {
-              console.error('Failed to update usage with confirmed duration:', error);
-            }
-          }
-          
-          // Only show completion toast if we haven't already
-          if (!transcriptionCompleted) {
-            toast.success("Transcription complete!");
-            setTranscriptionCompleted(true);
-          }
-        } else if (data.status === 'failed') {
-          setIsProcessing(false);
-          toast.error(`Transcription failed: ${data.error || 'Unknown error'}`);
-        } else if (data.progress_message) {
-          // Show progress messages if available
-          console.log(`Transcription progress: ${data.progress_message}`);
+      try {
+        const { data, error } = await supabase
+          .from('transcriptions')
+          .select('*, audio_duration, segments, file_path')
+          .eq('id', currentTranscriptionId)
+          .single();
+        
+        if (error) {
+          console.error('Failed to fetch transcription:', error);
+          return;
         }
+        
+        if (data) {
+          if (data.status === 'completed' && data.transcript) {
+            setTranscript(data.transcript);
+            setIsProcessing(false);
+            
+            // Store segments if available
+            if (data.segments) {
+              try {
+                let parsedSegments: TranscriptionSegment[] = [];
+                
+                if (typeof data.segments === 'string') {
+                  parsedSegments = JSON.parse(data.segments);
+                } else if (Array.isArray(data.segments)) {
+                  parsedSegments = data.segments;
+                }
+                
+                setSegments(parsedSegments);
+              } catch (error) {
+                console.error('Failed to parse segments:', error);
+              }
+            }
+            
+            // Create signed URL for the audio file
+            if (data.file_path) {
+              const { data: signedUrl } = await supabase.storage
+                .from('audio_files')
+                .createSignedUrl(data.file_path, 3600); // 1 hour expiry
+                
+              if (signedUrl?.signedUrl) {
+                setAudioUrl(signedUrl.signedUrl);
+              }
+            }
+            
+            // Store the audio duration - make sure to round it here
+            if (data.audio_duration) {
+              // Round to nearest integer to ensure no decimal places
+              const roundedDuration = Math.round(Number(data.audio_duration));
+              setAudioDuration(roundedDuration);
+              
+              // Update monthly usage with the actual audio duration from the server
+              try {
+                await updateMonthlyUsage(roundedDuration);
+                console.log(`Updated usage with confirmed duration: ${roundedDuration}s`);
+              } catch (error) {
+                console.error('Failed to update usage with confirmed duration:', error);
+              }
+            }
+            
+            // Only show completion toast if we haven't already
+            if (!transcriptionCompleted) {
+              toast.success("Transcription complete!");
+              setTranscriptionCompleted(true);
+            }
+          } else if (data.status === 'failed') {
+            setIsProcessing(false);
+            toast.error(`Transcription failed: ${data.error || 'Unknown error'}`);
+          } else if (data.progress_message) {
+            // Show progress messages if available
+            console.log(`Transcription progress: ${data.progress_message}`);
+          }
+        }
+      } catch (error) {
+        console.error('Error checking transcription status:', error);
       }
     };
     

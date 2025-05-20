@@ -14,13 +14,22 @@ import {
   Undo,
   Redo
 } from "lucide-react";
-import { $getSelection, $isRangeSelection, FORMAT_TEXT_COMMAND } from "lexical";
+import { 
+  $getSelection, 
+  $isRangeSelection, 
+  FORMAT_TEXT_COMMAND,
+  UNDO_COMMAND,
+  REDO_COMMAND
+} from "lexical";
 import { $setBlocksType } from "@lexical/selection";
 import { $createHeadingNode } from "@lexical/rich-text";
 import { HeadingTagType } from "@lexical/rich-text";
-import { INSERT_UNORDERED_LIST_COMMAND, INSERT_ORDERED_LIST_COMMAND, REMOVE_LIST_COMMAND } from "@lexical/list";
+import { 
+  INSERT_UNORDERED_LIST_COMMAND, 
+  INSERT_ORDERED_LIST_COMMAND, 
+  REMOVE_LIST_COMMAND 
+} from "@lexical/list";
 import { mergeRegister } from "@lexical/utils";
-import { REDO_COMMAND, UNDO_COMMAND } from "lexical";
 
 export function EditorToolbar() {
   const [editor] = useLexicalComposerContext();

@@ -6,7 +6,13 @@ import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import LexicalErrorBoundary from "@lexical/react/LexicalErrorBoundary";
 import { EditorToolbar } from "./EditorToolbar";
-import { $getRoot, $createParagraphNode, $createTextNode, EditorState, LexicalEditor } from "lexical";
+import { 
+  $getRoot, 
+  $createParagraphNode, 
+  $createTextNode, 
+  EditorState, 
+  LexicalEditor as LexicalEditorType 
+} from "lexical";
 import { cn } from "@/lib/utils";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 
@@ -19,7 +25,7 @@ interface LexicalEditorProps {
   }>;
   className?: string;
   readOnly?: boolean;
-  onEditorMount?: (editor: LexicalEditor) => void;
+  onEditorMount?: (editor: LexicalEditorType) => void;
   onEditorChange?: (editorState: EditorState) => void;
   currentTimeInSeconds?: number | null;
 }
@@ -50,7 +56,7 @@ export function LexicalEditor({
   onEditorChange,
   currentTimeInSeconds,
 }: LexicalEditorProps) {
-  const editorRef = useRef<LexicalEditor | null>(null);
+  const editorRef = useRef<LexicalEditorType | null>(null);
   
   const initialConfig = {
     namespace: "TranscriptEditor",
@@ -134,9 +140,11 @@ export function LexicalEditor({
         
         // Add timestamp data if available
         if (segment.start !== undefined && segment.end !== undefined) {
-          paragraphNode.setFormat("paragraph");
-          paragraphNode.setAttribute("data-start", segment.start.toString());
-          paragraphNode.setAttribute("data-end", segment.end.toString());
+          // Need to set data attributes after the node is appended to the DOM
+          paragraphNode.__timestamp = {
+            start: segment.start.toString(),
+            end: segment.end.toString()
+          };
         }
         
         const textNode = $createTextNode(segment.text);
@@ -167,6 +175,22 @@ export function LexicalEditor({
             if (onEditorChange) {
               onEditorChange(editorState);
             }
+            
+            // Apply timestamp data attributes to DOM
+            editor.update(() => {
+              const root = $getRoot();
+              const paragraphs = root.getChildren();
+              
+              paragraphs.forEach(paragraph => {
+                if (paragraph.__timestamp) {
+                  const element = editor.getElementByKey(paragraph.getKey());
+                  if (element) {
+                    element.setAttribute('data-start', paragraph.__timestamp.start);
+                    element.setAttribute('data-end', paragraph.__timestamp.end);
+                  }
+                }
+              });
+            });
           }}
         />
       </LexicalComposer>
