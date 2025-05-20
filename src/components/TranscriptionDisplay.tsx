@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -43,6 +42,28 @@ const formatTranscript = (text: string): string => {
     .trim();
 
   return formatted;
+};
+
+/**
+ * Format audio duration into a human-readable string
+ * @param seconds - Duration in seconds
+ * @returns Formatted string like "8 mins 20 secs" or "45 secs"
+ */
+const formatAudioDuration = (seconds: number): string => {
+  if (!seconds && seconds !== 0) return "";
+  
+  // Round to nearest second
+  const totalSeconds = Math.round(seconds);
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+  
+  if (minutes === 0) {
+    return `${remainingSeconds} ${remainingSeconds === 1 ? 'sec' : 'secs'}`;
+  } else if (remainingSeconds === 0) {
+    return `${minutes} ${minutes === 1 ? 'min' : 'mins'}`;
+  } else {
+    return `${minutes} ${minutes === 1 ? 'min' : 'mins'} ${remainingSeconds} ${remainingSeconds === 1 ? 'sec' : 'secs'}`;
+  }
 };
 
 const TranscriptionDisplay = ({ 
@@ -100,10 +121,8 @@ const TranscriptionDisplay = ({
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
   const paragraphs = formattedTranscript.split(/\n\s*\n/).filter(Boolean).length;
 
-  // Format audio duration as minutes:seconds
-  const formattedDuration = audioDuration ? 
-    `${Math.floor(audioDuration / 60)}:${(audioDuration % 60).toString().padStart(2, '0')}` : 
-    null;
+  // Format audio duration as a user-friendly string
+  const formattedDuration = audioDuration ? formatAudioDuration(audioDuration) : null;
 
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-lg">
