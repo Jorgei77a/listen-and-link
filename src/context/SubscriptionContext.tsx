@@ -1,4 +1,3 @@
-
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { SubscriptionInfo, Feature, SubscriptionTier, UserSubscription } from "@/types/subscription";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,10 +6,14 @@ import { toast } from "sonner";
 // Default values for feature limitations
 export const TIER_LIMITS = {
   free: {
-    maxFileSize: 10 * 1024 * 1024, // 10MB
-    exportFormats: ['plain'] as const,
-    customTitles: false,
-    maxMonthlyMinutes: 300, // 5 hours per month
+    // Temporarily unlock all features in free tier for testing
+    maxFileSize: 500 * 1024 * 1024, // 500MB (same as enterprise)
+    exportFormats: ['plain', 'markdown'] as const, // All formats
+    customTitles: true,
+    speakerDetection: true,
+    batchProcessing: true,
+    premiumModels: true,
+    maxMonthlyMinutes: Number.MAX_SAFE_INTEGER, // Unlimited
   },
   pro: {
     maxFileSize: 30 * 1024 * 1024, // 30MB
@@ -107,12 +110,15 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
         // Process the data to create a complete tier information object
         const processedTiers = tiersData.map(tier => {
-          const tierFeatures = tierFeaturesData
-            .filter(tf => tf.tier_id === tier.id)
-            .map(tf => {
-              return featuresData.find(f => f.id === tf.feature_id);
-            })
-            .filter(Boolean) as Feature[];
+          // TEMPORARY TESTING MODE: Add all features to the 'free' tier
+          const tierFeatures = tier.name === 'free' 
+            ? featuresData  // All features for free tier during testing
+            : tierFeaturesData
+                .filter(tf => tf.tier_id === tier.id)
+                .map(tf => {
+                  return featuresData.find(f => f.id === tf.feature_id);
+                })
+                .filter(Boolean) as Feature[];
 
           return {
             ...tier,
@@ -225,8 +231,12 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   };
 
   // Check if a feature is available in the current tier
+  // During testing, always return true for the free tier
   const hasFeature = (featureKey: string): boolean => {
     if (isLoading) return false;
+    
+    // TEMPORARY TESTING MODE: All features are available in free tier
+    if (currentTier === 'free') return true;
     
     // Find the current tier object
     const tier = tiers.find(t => t.name === currentTier);

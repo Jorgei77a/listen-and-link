@@ -2,7 +2,7 @@
 import { ReactNode } from "react";
 import { useSubscription } from "@/context/SubscriptionContext";
 import { Badge } from "@/components/ui/badge";
-import { LockIcon } from "lucide-react";
+import { LockIcon, BeakerIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface FeatureGateProps {
@@ -25,6 +25,7 @@ export function FeatureGate({
   const { hasFeature, currentTier, isLoading } = useSubscription();
 
   const isEnabled = hasFeature(featureKey);
+  const isTestingFeature = currentTier === 'free'; // Temporary indicator for testing mode
 
   // Loading state
   if (isLoading) {
@@ -37,10 +38,20 @@ export function FeatureGate({
       <div className="relative">
         {showBadge && (
           <Badge 
-            variant="secondary" 
-            className="absolute -top-2 -right-2 text-xs z-10 opacity-70"
+            variant={isTestingFeature ? "outline" : "secondary"}
+            className={cn(
+              "absolute -top-2 -right-2 text-xs z-10", 
+              isTestingFeature ? "border-amber-500 text-amber-500" : "opacity-70"
+            )}
           >
-            {currentTier}
+            {isTestingFeature ? (
+              <span className="flex items-center gap-1">
+                <BeakerIcon className="h-3 w-3" />
+                Testing
+              </span>
+            ) : (
+              currentTier
+            )}
           </Badge>
         )}
         {children}
