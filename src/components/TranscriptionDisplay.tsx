@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -14,6 +15,7 @@ interface TranscriptionDisplayProps {
   transcript: string;
   fileName: string;
   customTitle?: string;
+  audioDuration?: number | null;
   onReset: () => void;
 }
 
@@ -47,6 +49,7 @@ const TranscriptionDisplay = ({
   transcript, 
   fileName, 
   customTitle = "", 
+  audioDuration = null,
   onReset 
 }: TranscriptionDisplayProps) => {
   const [copied, setCopied] = useState(false);
@@ -96,6 +99,11 @@ const TranscriptionDisplay = ({
 
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
   const paragraphs = formattedTranscript.split(/\n\s*\n/).filter(Boolean).length;
+
+  // Format audio duration as minutes:seconds
+  const formattedDuration = audioDuration ? 
+    `${Math.floor(audioDuration / 60)}:${(audioDuration % 60).toString().padStart(2, '0')}` : 
+    null;
 
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-lg">
@@ -158,6 +166,15 @@ const TranscriptionDisplay = ({
             <span className="font-medium">File:</span>
             <span className="ml-1 truncate max-w-[200px]">{fileName}</span>
           </div>
+          {formattedDuration && (
+            <>
+              <Separator orientation="vertical" className="h-4" />
+              <div className="flex items-center">
+                <span className="font-medium">Duration:</span>
+                <span className="ml-1">{formattedDuration}</span>
+              </div>
+            </>
+          )}
         </div>
 
         <Tabs defaultValue="formatted">
