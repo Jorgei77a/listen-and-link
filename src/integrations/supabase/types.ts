@@ -101,6 +101,7 @@ export type Database = {
           file_size: number
           id: string
           progress_message: string | null
+          segments: Json | null
           status: string
           transcript: string | null
           updated_at: string | null
@@ -115,6 +116,7 @@ export type Database = {
           file_size: number
           id?: string
           progress_message?: string | null
+          segments?: Json | null
           status?: string
           transcript?: string | null
           updated_at?: string | null
@@ -129,6 +131,7 @@ export type Database = {
           file_size?: number
           id?: string
           progress_message?: string | null
+          segments?: Json | null
           status?: string
           transcript?: string | null
           updated_at?: string | null

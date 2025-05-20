@@ -16,6 +16,23 @@ interface TranscriptionSegment {
   text: string;
 }
 
+// Define the Transcription interface to match the database structure
+interface Transcription {
+  id: string;
+  file_name: string;
+  file_path: string;
+  file_size: number;
+  custom_title?: string | null;
+  status: string;
+  transcript?: string | null;
+  error?: string | null;
+  progress_message?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  audio_duration?: number | null;
+  segments?: TranscriptionSegment[] | null;
+}
+
 const Index = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [transcript, setTranscript] = useState<string | null>(null);
@@ -47,22 +64,25 @@ const Index = () => {
         }
         
         if (data) {
-          if (data.status === 'completed' && data.transcript) {
-            setTranscript(data.transcript);
+          const transcription = data as Transcription;
+          
+          if (transcription.status === 'completed' && transcription.transcript) {
+            setTranscript(transcription.transcript);
             setIsProcessing(false);
             
             // Parse segments if available - note that segments may not exist in database yet
             let parsedSegments: TranscriptionSegment[] = [];
             
-            // We'll generate basic segments from the transcript since the database doesn't have segments
-            if (!data.hasOwnProperty('segments')) {
-              console.log('Segments field not found in database, generating basic segments from transcript');
+            // We'll generate basic segments from the transcript if needed
+            if (!transcription.segments) {
+              console.log('No segments found, generating basic segments from transcript');
               
               // Simple sentence splitting for segments when no timestamp data is available
-              if (data.transcript) {
-                const sentences = data.transcript.split(/(?<=[.!?])\s+/).filter(Boolean);
+              if (transcription.transcript) {
+                const sentences = transcription.transcript.split(/(?<=[.!?])\s+/).filter(Boolean);
                 let currentTime = 0;
-                const avgTimePerSentence = data.audio_duration ? Math.max(1, data.audio_duration / sentences.length) : 3;
+                const avgTimePerSentence = transcription.audio_duration ? 
+                  Math.max(1, transcription.audio_duration / sentences.length) : 3;
                 
                 parsedSegments = sentences.map((sentence, index) => {
                   const segmentStart = currentTime;
@@ -75,27 +95,19 @@ const Index = () => {
                 });
               }
             } else {
-              // If segments exist in the future, parse them here
-              try {
-                if (data.segments) {
-                  if (typeof data.segments === 'string') {
-                    parsedSegments = JSON.parse(data.segments);
-                  } else if (Array.isArray(data.segments)) {
-                    parsedSegments = data.segments;
-                  }
-                }
-              } catch (error) {
-                console.error('Failed to parse segments:', error);
-              }
+              // Handle segments if they exist in the response
+              parsedSegments = Array.isArray(transcription.segments) ? 
+                transcription.segments : 
+                [];
             }
             
             setSegments(parsedSegments);
             
             // Create signed URL for the audio file
-            if (data.file_path) {
+            if (transcription.file_path) {
               const { data: signedUrl } = await supabase.storage
                 .from('audio_files')
-                .createSignedUrl(data.file_path, 3600); // 1 hour expiry
+                .createSignedUrl(transcription.file_path, 3600); // 1 hour expiry
                 
               if (signedUrl?.signedUrl) {
                 setAudioUrl(signedUrl.signedUrl);
@@ -103,9 +115,9 @@ const Index = () => {
             }
             
             // Store the audio duration - make sure to round it here
-            if (data.audio_duration) {
+            if (transcription.audio_duration) {
               // Round to nearest integer to ensure no decimal places
-              const roundedDuration = Math.round(Number(data.audio_duration));
+              const roundedDuration = Math.round(Number(transcription.audio_duration));
               setAudioDuration(roundedDuration);
               
               // Update monthly usage with the actual audio duration from the server
@@ -122,12 +134,12 @@ const Index = () => {
               toast.success("Transcription complete!");
               setTranscriptionCompleted(true);
             }
-          } else if (data.status === 'failed') {
+          } else if (transcription.status === 'failed') {
             setIsProcessing(false);
-            toast.error(`Transcription failed: ${data.error || 'Unknown error'}`);
-          } else if (data.progress_message) {
+            toast.error(`Transcription failed: ${transcription.error || 'Unknown error'}`);
+          } else if (transcription.progress_message) {
             // Show progress messages if available
-            console.log(`Transcription progress: ${data.progress_message}`);
+            console.log(`Transcription progress: ${transcription.progress_message}`);
           }
         }
       } catch (error) {
