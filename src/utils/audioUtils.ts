@@ -24,14 +24,13 @@ export const getAudioDuration = (file: File): Promise<number> => {
       return;
     }
     
-    // Create a new context for each file to avoid issues with suspended contexts
-    let audioContext: AudioContext | null = new AudioContext();
+    const audioContext = new AudioContext();
     
     // Create file reader to read the file as ArrayBuffer
     const reader = new FileReader();
     
     reader.onload = (event) => {
-      if (!event.target?.result || !audioContext) {
+      if (!event.target?.result) {
         reject(new Error('Failed to read file'));
         return;
       }
@@ -46,9 +45,8 @@ export const getAudioDuration = (file: File): Promise<number> => {
           resolve(duration);
           
           // Close the audio context to free resources
-          if (audioContext && audioContext.state !== 'closed') {
+          if (audioContext.state !== 'closed') {
             audioContext.close();
-            audioContext = null;
           }
         },
         (error) => {
@@ -58,9 +56,8 @@ export const getAudioDuration = (file: File): Promise<number> => {
           console.log('Using estimated duration due to decode error:', estimatedDuration);
           resolve(estimatedDuration);
           
-          if (audioContext && audioContext.state !== 'closed') {
+          if (audioContext.state !== 'closed') {
             audioContext.close();
-            audioContext = null;
           }
         }
       );
@@ -71,12 +68,6 @@ export const getAudioDuration = (file: File): Promise<number> => {
       // Fallback to estimation on read error
       const estimatedDuration = estimateAudioDuration(file);
       resolve(estimatedDuration);
-      
-      // Clean up the context
-      if (audioContext && audioContext.state !== 'closed') {
-        audioContext.close();
-        audioContext = null;
-      }
     };
     
     // Read the file as an ArrayBuffer
@@ -107,121 +98,4 @@ export const estimateAudioDuration = (file: File): number => {
   const durationSeconds = Math.round((file.size * 8) / bitrate);
   
   return durationSeconds;
-};
-
-/**
- * Buffer time configuration in seconds
- * - segmentEndBuffer: Extra time to add after a segment's end time (prevents cutting off)
- * - segmentLookaheadBuffer: Time to start highlighting the next segment before its start time
- * - recoveryCheckInterval: How often to check for frozen state (ms)
- * - debugMode: Whether to show buffer timing information visually
- */
-export const DEFAULT_SEGMENT_BUFFERS = {
-  segmentEndBuffer: 5.0,      // 5.0 seconds additional playback after segment end (increased from 1.5)
-  segmentLookaheadBuffer: 0.5, // Start highlighting next segment 0.5s before its start (increased from 0.3)
-  recoveryCheckInterval: 5000, // Check for frozen state every 5 seconds
-  debugMode: false            // Set to true to enable visual buffer indicators
-};
-
-/**
- * Check if a time is within a segment's bounds, accounting for buffer time
- * IMPORTANT: This function is for UI highlighting ONLY and should not affect playback
- */
-export const isTimeInSegment = (
-  time: number, 
-  segmentStart: number, 
-  segmentEnd: number, 
-  bufferTime: number = DEFAULT_SEGMENT_BUFFERS.segmentEndBuffer
-): boolean => {
-  return segmentStart <= time && time <= (segmentEnd + bufferTime);
-};
-
-/**
- * Find the active segment given the current time and a list of segments
- * IMPORTANT: This function is for UI highlighting ONLY and should not affect playback
- */
-export const findActiveSegment = (
-  currentTime: number,
-  segments: Array<{ start: number; end: number }>,
-  options = DEFAULT_SEGMENT_BUFFERS
-): number | null => {
-  // First check if any segment is directly active (including buffer time)
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i];
-    if (isTimeInSegment(currentTime, segment.start, segment.end, options.segmentEndBuffer)) {
-      return i;
-    }
-  }
-  
-  // If no direct active segment, check for lookahead to next segment
-  for (let i = 0; i < segments.length - 1; i++) {
-    const currentSegment = segments[i];
-    const nextSegment = segments[i + 1];
-    
-    // If we're between current segment (plus buffer) and next segment's start
-    // but within the lookahead window of the next segment
-    if (
-      currentTime > (currentSegment.end + options.segmentEndBuffer) && 
-      currentTime < nextSegment.start &&
-      currentTime >= (nextSegment.start - options.segmentLookaheadBuffer)
-    ) {
-      return i + 1; // Return the next segment
-    }
-  }
-  
-  return null; // No active segment found
-};
-
-/**
- * Check if audio player is in frozen state by comparing timestamps
- * @param lastUpdateTime Time of last observed time update
- * @param isPlaying Whether player reports it's playing
- * @returns boolean indicating if player might be frozen
- */
-export const detectFrozenState = (
-  lastUpdateTime: number,
-  isPlaying: boolean
-): boolean => {
-  // If not playing, player isn't frozen
-  if (!isPlaying) return false;
-  
-  // If we haven't received a time update in 3 seconds while playing, 
-  // consider the player frozen
-  const timeSinceLastUpdate = Date.now() - lastUpdateTime;
-  return timeSinceLastUpdate > 3000;
-};
-
-/**
- * Reset audio player to recover from frozen state
- * @param audioElement HTML Audio element reference
- * @returns Promise that resolves when reset is complete
- */
-export const resetAudioPlayer = async (audioElement: HTMLAudioElement): Promise<void> => {
-  // Store current position and playing state
-  const currentTime = audioElement.currentTime;
-  const wasPlaying = !audioElement.paused;
-  
-  // Pause and reset element
-  try {
-    await audioElement.pause();
-    
-    // Small delay to allow browser to process
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Set time to slightly before where we were
-    const safeTime = Math.max(0, currentTime - 0.5);
-    audioElement.currentTime = safeTime;
-    
-    // If it was playing, resume
-    if (wasPlaying) {
-      await audioElement.play().catch(error => {
-        console.error("Error resuming after reset:", error);
-      });
-    }
-    
-    console.log("Audio player successfully reset");
-  } catch (error) {
-    console.error("Error during audio player reset:", error);
-    throw error;
-  }
 };

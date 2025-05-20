@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -9,7 +10,7 @@ import { LexicalEditor } from "@/components/editor/LexicalEditor";
 import { AudioPlayer } from "@/components/editor/AudioPlayer";
 import { ExportOptions } from "@/components/editor/ExportOptions";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
-import { DEFAULT_SEGMENT_BUFFERS } from "@/utils/audioUtils";
+import { useSubscription } from "@/context/SubscriptionContext";
 
 interface TranscriptionDisplayProps {
   transcript: string;
@@ -60,151 +61,34 @@ const TranscriptionDisplay = ({
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [editorReady, setEditorReady] = useState(false);
-  const [playerReady, setPlayerReady] = useState(false);
-  
-  // Stable refs to prevent infinite loops
-  const audioPlayerCallbackRef = useRef<((time: number) => void) | null>(null);
-  const lastSegmentClickTimeRef = useRef<number>(0);
-  const isUpdatingFromPlayerRef = useRef<boolean>(false);
-  const isUpdatingFromEditorRef = useRef<boolean>(false);
-  const currentTimeRef = useRef<number | null>(currentTime);
-  const isFirstTimeUpdateRef = useRef<boolean>(true);
-  const timeoutIdsRef = useRef<number[]>([]);
-  
-  // Configure optimized buffer settings - increased buffer to 5 seconds
-  const bufferSettings = {
-    ...DEFAULT_SEGMENT_BUFFERS,
-    segmentEndBuffer: 5.0,        // 5 seconds extra time after segment ends (increased from 1.5s)
-    segmentLookaheadBuffer: 0.5,  // Start highlighting next segment 0.5s early (increased from 0.3s)
-    debugMode: false              // Set to true for debugging buffer timing visuals
-  };
-  
-  // Clear a timeout and remove it from tracking
-  const clearTrackedTimeout = useCallback((id: number) => {
-    window.clearTimeout(id);
-    timeoutIdsRef.current = timeoutIdsRef.current.filter(t => t !== id);
-  }, []);
-  
-  // Create a tracked timeout
-  const createTrackedTimeout = useCallback((callback: () => void, delay: number): number => {
-    const id = window.setTimeout(() => {
-      callback();
-      // Auto-remove from tracking after execution
-      timeoutIdsRef.current = timeoutIdsRef.current.filter(t => t !== id);
-    }, delay);
-    
-    // Add to tracked timeouts
-    timeoutIdsRef.current.push(id);
-    return id;
-  }, []);
-  
-  // Clear all tracked timeouts
-  const clearAllTrackedTimeouts = useCallback(() => {
-    timeoutIdsRef.current.forEach(id => window.clearTimeout(id));
-    timeoutIdsRef.current = [];
-  }, []);
-  
-  // Keep currentTimeRef in sync
-  useEffect(() => {
-    currentTimeRef.current = currentTime;
-  }, [currentTime]);
-  
-  // Clean up timeouts on unmount
-  useEffect(() => {
-    return () => {
-      clearAllTrackedTimeouts();
-    };
-  }, [clearAllTrackedTimeouts]);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
-  // Memoized handlers
-  const handleCopy = useCallback(() => {
+  const handleCopy = () => {
     navigator.clipboard.writeText(transcript);
     setCopied(true);
     toast.success("Transcript copied to clipboard!");
     setTimeout(() => setCopied(false), 2000);
-  }, [transcript]);
+  };
 
-  const handleEditorMount = useCallback((editorInstance: LexicalEditorType) => {
+  const handleEditorMount = (editorInstance: LexicalEditorType) => {
+    console.log("Editor mounted successfully");
     setEditor(editorInstance);
     setEditorReady(true);
-  }, []);
+  };
 
-  const handleEditorChange = useCallback((editorState: EditorState) => {
+  const handleEditorChange = (editorState: EditorState) => {
     // Handle editor changes if needed
-  }, []);
+  };
 
-  // Improved time update handler from AudioPlayer
-  const handleTimeUpdate = useCallback((time: number) => {
-    // Skip first update as it's often triggered on load with time=0
-    if (isFirstTimeUpdateRef.current) {
-      isFirstTimeUpdateRef.current = false;
-      return;
-    }
-    
-    // Prevent updates while editor is sending time updates to player
-    if (isUpdatingFromEditorRef.current) return;
-    
-    // Signal that we're updating from player
-    isUpdatingFromPlayerRef.current = true;
-    
-    // Only update if the time has actually changed
-    if (currentTimeRef.current === null || Math.abs((currentTimeRef.current || 0) - time) > 0.5) {
-      setCurrentTime(time);
-    }
-    
-    // Reset the lock after a delay
-    createTrackedTimeout(() => {
-      isUpdatingFromPlayerRef.current = false;
-    }, 500); // Increased debounce time to prevent loops
-  }, [createTrackedTimeout]);
+  const handleTimeUpdate = (time: number) => {
+    setCurrentTime(time);
+  };
 
-  // Improved segment click handler with better debouncing
-  const handleSegmentClick = useCallback((time: number) => {
-    // Prevent multiple rapid clicks or updates while player is updating editor
-    if (isUpdatingFromPlayerRef.current) return;
-    
-    // Strong debounce for rapid clicks
-    const now = Date.now();
-    if (now - lastSegmentClickTimeRef.current < 1200) {
-      return;
-    }
-    lastSegmentClickTimeRef.current = now;
-    
-    // Signal that we're updating from editor
-    isUpdatingFromEditorRef.current = true;
-    
-    // Only update if there's actually a change
-    if (currentTimeRef.current === null || Math.abs((currentTimeRef.current || 0) - time) > 0.2) {
-      setCurrentTime(time);
-      
-      // Call the audio player's jumpToTime function with delay to ensure state is updated
-      createTrackedTimeout(() => {
-        if (audioPlayerCallbackRef.current) {
-          audioPlayerCallbackRef.current(time);
-        }
-      }, 100);
-    }
-    
-    // Reset the lock after a longer delay
-    createTrackedTimeout(() => {
-      isUpdatingFromEditorRef.current = false;
-    }, 800);
-  }, [createTrackedTimeout]);
-
-  // Improved jump-to-time callback registration with cleanup
-  const handleJumpToTimeRegistration = useCallback((callback: (time: number) => void) => {
-    // Store the callback in a stable ref that won't change
-    audioPlayerCallbackRef.current = callback;
-    setPlayerReady(true);
-    
-    // Return cleanup function
-    return () => {
-      audioPlayerCallbackRef.current = null;
-      setPlayerReady(false);
-    };
-  }, []);
+  const jumpToTime = (time: number) => {
+    // This would be called when clicking on a paragraph with a timestamp
+    setCurrentTime(time);
+  };
 
   // Extract statistics from the transcript
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
@@ -258,7 +142,7 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
-        {/* Lexical Editor with improved 5-second buffer settings */}
+        {/* Lexical Editor */}
         <LexicalEditor 
           initialText={transcript}
           segments={segments}
@@ -266,26 +150,18 @@ const TranscriptionDisplay = ({
           onEditorMount={handleEditorMount}
           onEditorChange={handleEditorChange}
           currentTimeInSeconds={currentTime}
-          onSegmentClick={handleSegmentClick}
-          bufferSettings={bufferSettings}
         />
         
-        {/* Audio Player with optimized props */}
+        {/* Audio Player */}
         {audioUrl && (
           <div className="mt-4">
             <AudioPlayer 
               src={audioUrl} 
               onTimeUpdate={handleTimeUpdate} 
-              onJumpToTime={handleJumpToTimeRegistration}
+              onJumpToTime={jumpToTime}
             />
           </div>
         )}
-        
-        {/* Debug information - includes improved buffer settings */}
-        <div className="mt-4 p-2 bg-gray-50 rounded-md text-xs text-muted-foreground">
-          <p>Status: {audioUrl ? "✅ Audio loaded" : "❌ No audio"}, Editor: {editorReady ? "✅ Ready" : "❌ Loading"}, Player: {playerReady ? "✅ Ready" : "❌ Loading"}</p>
-          {currentTime !== null && <p>Position: {currentTime.toFixed(2)}s, Buffer: {bufferSettings.segmentEndBuffer.toFixed(1)}s</p>}
-        </div>
         
         <div className="mt-6 text-center">
           <Button onClick={onReset}>Transcribe Another File</Button>
