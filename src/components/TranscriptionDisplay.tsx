@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -10,7 +10,6 @@ import { LexicalEditor } from "@/components/editor/LexicalEditor";
 import { AudioPlayer } from "@/components/editor/AudioPlayer";
 import { ExportOptions } from "@/components/editor/ExportOptions";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
-import { formatTimestamp, findSegmentAtTime, hasReachedSegmentEnd, TranscriptSegment } from "@/utils/audioSyncUtils";
 import { useSubscription } from "@/context/SubscriptionContext";
 
 interface TranscriptionDisplayProps {
@@ -58,18 +57,13 @@ const TranscriptionDisplay = ({
   segments = [],
   onReset 
 }: TranscriptionDisplayProps) => {
-  // State management
   const [copied, setCopied] = useState(false);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [editorReady, setEditorReady] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [jumpToTimeHandler, setJumpToTimeHandler] = useState<((time: number) => void) | null>(null);
-  const [currentSegment, setCurrentSegment] = useState<TranscriptSegment | null>(null);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
-  // Handle copy action
   const handleCopy = () => {
     navigator.clipboard.writeText(transcript);
     setCopied(true);
@@ -77,7 +71,6 @@ const TranscriptionDisplay = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Handle editor mounting
   const handleEditorMount = (editorInstance: LexicalEditorType) => {
     console.log("Editor mounted successfully");
     setEditor(editorInstance);
@@ -88,66 +81,13 @@ const TranscriptionDisplay = ({
     // Handle editor changes if needed
   };
 
-  // Handle segment boundary reached
-  const handleSegmentBoundaryReached = useCallback((time: number) => {
-    // If we don't have segments or the player isn't playing, just return
-    if (!segments.length || !isPlaying) return;
-    
-    // Find current segment
-    const segment = findSegmentAtTime(time, segments);
-    
-    // If we have a current segment and we've reached its end, pause playback
-    if (segment && hasReachedSegmentEnd(time, segment)) {
-      console.log(`Reached end of segment at ${time}s (segment ends at ${segment.end}s)`);
-      
-      // Use the audio player controls to pause
-      if (window && (window as any).__audioPlayerControls) {
-        console.log("Pausing at segment boundary");
-        (window as any).__audioPlayerControls.pauseAudio();
-      }
-    }
-  }, [segments, isPlaying]);
-
-  // Handle time updates from the audio player
-  const handleTimeUpdate = useCallback((time: number) => {
+  const handleTimeUpdate = (time: number) => {
     setCurrentTime(time);
-    
-    // Find the current segment at this time
-    if (segments.length > 0) {
-      const segment = findSegmentAtTime(time, segments);
-      
-      // Only update if different to avoid unnecessary re-renders
-      if (segment && (!currentSegment || segment.start !== currentSegment.start)) {
-        setCurrentSegment(segment);
-      } else if (!segment && currentSegment) {
-        setCurrentSegment(null);
-      }
-      
-      // Check if we've reached a segment boundary
-      if (segment && hasReachedSegmentEnd(time, segment)) {
-        handleSegmentBoundaryReached(time);
-      }
-    }
-  }, [segments, currentSegment, handleSegmentBoundaryReached]);
+  };
 
-  // Set up the jump to time handler that will be passed to the editor
-  const handleJumpToTimeSetup = useCallback((jumpHandler: (time: number) => void) => {
-    console.log("Jump to time handler set up");
-    setJumpToTimeHandler(() => jumpHandler);
-  }, []);
-
-  // Handle segment click from transcript
-  const handleSegmentClick = useCallback((time: number) => {
-    console.log(`Segment clicked, jumping to time: ${time}s`);
-    
-    if (jumpToTimeHandler) {
-      jumpToTimeHandler(time);
-    }
-  }, [jumpToTimeHandler]);
-
-  // Handle playback state change
-  const handlePlaybackStateChange = (playing: boolean) => {
-    setIsPlaying(playing);
+  const jumpToTime = (time: number) => {
+    // This would be called when clicking on a paragraph with a timestamp
+    setCurrentTime(time);
   };
 
   // Extract statistics from the transcript
@@ -156,20 +96,12 @@ const TranscriptionDisplay = ({
 
   // Format audio duration as a user-friendly string
   const formattedDuration = audioDuration !== null ? formatAudioDuration(audioDuration) : null;
-  const currentTimeFormatted = currentTime !== null ? formatTimestamp(currentTime) : "00:00";
 
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-lg">
       <div className="p-6">
         <div className="flex justify-between items-center mb-4">
-          <div className="flex flex-col">
-            <h2 className="text-xl font-bold truncate max-w-[60%]">{displayTitle}</h2>
-            {isPlaying && currentTime !== null && (
-              <span className="text-xs text-muted-foreground mt-1">
-                Currently at {currentTimeFormatted}
-              </span>
-            )}
-          </div>
+          <h2 className="text-xl font-bold truncate max-w-[60%]">{displayTitle}</h2>
           <div className="flex space-x-2">
             <Button variant="outline" onClick={handleCopy}>
               <Copy className="w-4 h-4 mr-2" />
@@ -210,29 +142,26 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
-        {/* Audio Player (placed before editor for better UX) */}
-        {audioUrl && (
-          <div className="mb-4">
-            <AudioPlayer 
-              src={audioUrl} 
-              onTimeUpdate={handleTimeUpdate} 
-              onJumpToTime={handleJumpToTimeSetup}
-              onPlaybackStateChange={handlePlaybackStateChange}
-              onSegmentBoundaryReached={handleSegmentBoundaryReached}
-            />
-          </div>
-        )}
-
         {/* Lexical Editor */}
         <LexicalEditor 
           initialText={transcript}
           segments={segments}
-          className="mt-4"
+          className="mb-4"
           onEditorMount={handleEditorMount}
           onEditorChange={handleEditorChange}
           currentTimeInSeconds={currentTime}
-          onJumpToTime={handleSegmentClick}
         />
+        
+        {/* Audio Player */}
+        {audioUrl && (
+          <div className="mt-4">
+            <AudioPlayer 
+              src={audioUrl} 
+              onTimeUpdate={handleTimeUpdate} 
+              onJumpToTime={jumpToTime}
+            />
+          </div>
+        )}
         
         <div className="mt-6 text-center">
           <Button onClick={onReset}>Transcribe Another File</Button>
@@ -240,6 +169,6 @@ const TranscriptionDisplay = ({
       </div>
     </Card>
   );
-}
+};
 
 export default TranscriptionDisplay;
