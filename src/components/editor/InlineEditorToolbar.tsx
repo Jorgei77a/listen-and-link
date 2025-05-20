@@ -39,54 +39,54 @@ export function InlineEditorToolbar() {
   }, [editor]);
 
   return (
-    <div className="flex items-center gap-1 p-1 bg-muted/50 border-b rounded-t-md">
+    <div className="flex items-center gap-1 p-1 mb-1 bg-muted/50 border rounded-md">
       <Button 
         onClick={formatBold} 
         variant="ghost" 
         size="icon" 
-        className="h-7 w-7" 
+        className="h-6 w-6" 
         title="Bold"
       >
-        <Bold className="h-3.5 w-3.5" />
+        <Bold className="h-3 w-3" />
       </Button>
       <Button 
         onClick={formatItalic} 
         variant="ghost" 
         size="icon" 
-        className="h-7 w-7"
+        className="h-6 w-6"
         title="Italic"
       >
-        <Italic className="h-3.5 w-3.5" />
+        <Italic className="h-3 w-3" />
       </Button>
       <Button 
         onClick={formatUnderline} 
         variant="ghost" 
         size="icon" 
-        className="h-7 w-7"
+        className="h-6 w-6"
         title="Underline"
       >
-        <Underline className="h-3.5 w-3.5" />
+        <Underline className="h-3 w-3" />
       </Button>
 
-      <div className="w-px h-5 bg-border mx-1" />
+      <div className="w-px h-4 bg-border mx-1" />
 
       <Button 
         onClick={undo}
         variant="ghost" 
         size="icon" 
-        className="h-7 w-7"
+        className="h-6 w-6"
         title="Undo"
       >
-        <Undo className="h-3.5 w-3.5" />
+        <Undo className="h-3 w-3" />
       </Button>
       <Button 
         onClick={redo}
         variant="ghost" 
         size="icon" 
-        className="h-7 w-7"
+        className="h-6 w-6"
         title="Redo"
       >
-        <Redo className="h-3.5 w-3.5" />
+        <Redo className="h-3 w-3" />
       </Button>
     </div>
   );

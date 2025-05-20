@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -160,9 +161,9 @@ const TranscriptionDisplay = ({
         )}
         
         {/* Editable Interactive Transcript - combines navigation and editing */}
-        {segments && segments.length > 0 && (
-          <div className="mt-4 border rounded-md">
-            <h3 className="text-lg font-medium px-4 pt-3 pb-1">Transcript</h3>
+        <div className="mt-4 border rounded-md">
+          <h3 className="text-lg font-medium px-4 pt-3 pb-1">Transcript</h3>
+          {segments && segments.length > 0 ? (
             <EditableInteractiveTranscript
               segments={segments}
               currentTime={currentTime}
@@ -171,8 +172,12 @@ const TranscriptionDisplay = ({
               className="h-[400px]"
               onEditorMount={handleEditorMount}
             />
-          </div>
-        )}
+          ) : (
+            <div className="p-4 text-muted-foreground italic">
+              No segments available for this transcript.
+            </div>
+          )}
+        </div>
         
         <div className="mt-6 text-center">
           <Button onClick={onReset}>Transcribe Another File</Button>

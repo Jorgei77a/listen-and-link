@@ -11,7 +11,6 @@ import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { $getRoot, $createParagraphNode, $createTextNode, LexicalEditor } from "lexical";
 import { ListItemNode, ListNode } from "@lexical/list";
 import { HeadingNode } from "@lexical/rich-text";
-import { EditorToolbar } from "./EditorToolbar";
 import { InlineEditorToolbar } from "./InlineEditorToolbar";
 import { 
   findActiveSegment, 
@@ -71,16 +70,19 @@ function SegmentEditor({
       data-end={segment.end}
     >
       <LexicalComposer initialConfig={initialConfig}>
-        <RichTextPlugin
-          contentEditable={
-            <ContentEditable 
-              className="outline-none focus-visible:ring-1 focus-visible:ring-primary rounded px-1" 
-              onClick={(e) => e.stopPropagation()} // Prevent triggering parent onClick
-            />
-          }
-          placeholder={null}
-          ErrorBoundary={LexicalErrorBoundary}
-        />
+        <div className="relative">
+          <InlineEditorToolbar />
+          <RichTextPlugin
+            contentEditable={
+              <ContentEditable 
+                className="outline-none focus-visible:ring-1 focus-visible:ring-primary rounded px-1 min-h-[24px]" 
+                onClick={(e) => e.stopPropagation()} // Prevent triggering parent onClick
+              />
+            }
+            placeholder={null}
+            ErrorBoundary={LexicalErrorBoundary}
+          />
+        </div>
         <HistoryPlugin />
         <ListPlugin />
         <OnChangePlugin
