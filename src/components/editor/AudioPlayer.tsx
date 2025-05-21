@@ -166,6 +166,16 @@ export function AudioPlayer({
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   }, []);
 
+  // Define a local function to handle time updates from the audio element
+  const localHandleTimeUpdate = () => {
+    if (audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+      if (onTimeUpdate) {
+        onTimeUpdate(audioRef.current.currentTime);
+      }
+    }
+  };
+
   // Don't create a new audio element on each render
   // Only render the audio element if using the internal ref
   return (
@@ -174,7 +184,7 @@ export function AudioPlayer({
         <audio
           ref={audioRef}
           src={audioSrc}
-          onTimeUpdate={handleTimeUpdate}
+          onTimeUpdate={localHandleTimeUpdate}  // Changed from handleTimeUpdate to localHandleTimeUpdate
           onLoadedMetadata={() => {
             if (audioRef.current) {
               setDuration(audioRef.current.duration);
