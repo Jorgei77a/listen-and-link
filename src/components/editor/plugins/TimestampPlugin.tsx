@@ -16,7 +16,6 @@ import {
 import { $isTimestampedTextNode } from "../nodes/TimestampedTextNode";
 import { MiniPlayerBubble } from "../MiniPlayerBubble";
 import { mergeRegister } from "@lexical/utils";
-import { Play, SkipBack, Pause, Info } from "lucide-react"; // Add missing imports
 
 export const PLAY_AUDIO_FROM_TIMESTAMP_COMMAND: LexicalCommand<{
   nodeKey: NodeKey;
@@ -30,7 +29,7 @@ interface TimestampPluginProps {
   currentTime: number;
   leadInOffset?: number;
   editingMode: boolean;
-  onContextMenu?: (x: number, y: number, hasTimestamp: boolean) => void;
+  onContextMenu?: (x: number, y: number, hasTimestamp: boolean, timestamp: number | null) => void;
 }
 
 export function TimestampPlugin({
@@ -116,8 +115,6 @@ export function TimestampPlugin({
   // Handle ctrl/alt + click for quick preview
   useEffect(() => {
     const handleMouseDown = (e: MouseEvent) => {
-      if (!editingMode) return;
-      
       // Check if ctrl key (Windows/Linux) or alt/option key (macOS) is pressed
       if (e.ctrlKey || e.altKey) {
         e.preventDefault();
@@ -141,50 +138,45 @@ export function TimestampPlugin({
       }
     };
     
-    // Add handler for right-click / context menu
-    const handleContextMenu = (e: MouseEvent) => {
-      if (!editingMode || !onContextMenu) return;
+    // Find the timestamp in a node
+    const getTimestampFromElement = (element: HTMLElement): number | null => {
+      // First check if the element itself has a timestamp attribute
+      if (element.hasAttribute('data-timestamp')) {
+        return parseFloat(element.getAttribute('data-timestamp') || '0');
+      }
       
-      // Let's check if the node under the cursor has a timestamp
-      let hasTimestamp = false;
+      // Then check if any parent element has a timestamp attribute
+      const timestampEl = element.closest('[data-timestamp]');
+      if (timestampEl) {
+        return parseFloat(timestampEl.getAttribute('data-timestamp') || '0');
+      }
       
-      editor.getEditorState().read(() => {
-        // Get the DOM node that was right-clicked
-        // We'll use this to find the corresponding Lexical node
-        const domNode = e.target as Node;
-        
-        // Get the selection based on where the user clicked
-        const selection = window.getSelection();
-        if (!selection || selection.rangeCount === 0) return;
-        
-        // Try to find a timestamped node in the current selection or parent hierarchy
-        if (selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0);
-          const node = range.startContainer.parentElement;
-          
-          // Check if the clicked element or its parent has a data-timestamp attribute
-          if (node) {
-            hasTimestamp = node.hasAttribute('data-timestamp') || 
-                          node.parentElement?.hasAttribute('data-timestamp') ||
-                          node.closest('[data-timestamp]') !== null;
-          }
-        }
-      });
-      
-      // Prevent the default browser context menu
-      e.preventDefault();
-      
-      // Call the context menu handler with the mouse position and timestamp info
-      onContextMenu(
-        e.pageX, 
-        e.pageY,
-        hasTimestamp
-      );
+      return null;
     };
     
-    // Touch support for long press - simulate context menu
+    // Improved context menu handler
+    const handleContextMenu = (e: MouseEvent) => {
+      if (!onContextMenu) return;
+      
+      e.preventDefault(); // Prevent default browser context menu
+      
+      // Find the timestamp at the clicked position
+      let timestamp: number | null = null;
+      let hasTimestamp = false;
+      
+      // Get the element that was clicked
+      const target = e.target as HTMLElement;
+      
+      timestamp = getTimestampFromElement(target);
+      hasTimestamp = timestamp !== null;
+      
+      // Call the context menu handler with the mouse position and timestamp info
+      onContextMenu(e.pageX, e.pageY, hasTimestamp, timestamp);
+    };
+    
+    // Touch support for long press
     const handleTouchStart = (e: TouchEvent) => {
-      if (!editingMode || !onContextMenu) return;
+      if (!onContextMenu) return;
       
       // Store touch start position
       const touch = e.touches[0];
@@ -194,20 +186,19 @@ export function TimestampPlugin({
       longPressTimer.current = setTimeout(() => {
         if (!touchStartPos.current) return;
         
-        // Check if the touch target has a timestamp
-        let hasTimestamp = false;
-        const touchTarget = e.target as HTMLElement;
+        // Get the element that was touched
+        const target = e.target as HTMLElement;
         
-        if (touchTarget) {
-          hasTimestamp = touchTarget.hasAttribute('data-timestamp') || 
-                         touchTarget.closest('[data-timestamp]') !== null;
-        }
+        // Find timestamp in the touched element
+        const timestamp = getTimestampFromElement(target);
+        const hasTimestamp = timestamp !== null;
         
-        // Call the context menu handler
+        // Call the context menu handler with the touch position and timestamp info
         onContextMenu(
           touchStartPos.current.x,
           touchStartPos.current.y,
-          hasTimestamp
+          hasTimestamp,
+          timestamp
         );
         
         // Clear the touch position
@@ -215,7 +206,7 @@ export function TimestampPlugin({
       }, 500); // 500ms is a common duration for long press
     };
     
-    const handleTouchMove = (e: TouchEvent) => {
+    const handleTouchMove = () => {
       // If the user moves their finger, cancel the long press timer
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);
@@ -250,22 +241,10 @@ export function TimestampPlugin({
     }
     
     return () => {};
-  }, [editor, playFromTimestamp, editingMode, onContextMenu]);
+  }, [editor, playFromTimestamp, onContextMenu]);
   
   // Add visual indicators (faint play icon) for timestamped paragraphs
   useEffect(() => {
-    if (!editingMode) {
-      // Remove all indicators if not in editing mode
-      const paragraphs = editor.getRootElement()?.querySelectorAll('p');
-      if (paragraphs) {
-        paragraphs.forEach(p => {
-          p.classList.remove('timestamped-paragraph');
-          p.removeAttribute('data-has-timestamp');
-        });
-      }
-      return;
-    }
-    
     // Track selection changes to update UI indicators
     return mergeRegister(
       editor.registerUpdateListener(({editorState}) => {
@@ -300,7 +279,7 @@ export function TimestampPlugin({
         COMMAND_PRIORITY_EDITOR
       )
     );
-  }, [editor, editingMode]);
+  }, [editor]);
 
   // Return the mini player bubble component when it should be shown
   return showBubble ? (

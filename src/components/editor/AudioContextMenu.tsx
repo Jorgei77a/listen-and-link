@@ -1,147 +1,103 @@
 
 import { 
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger 
-} from "@/components/ui/context-menu";
-import { ReactNode, useState, useEffect, useRef } from "react";
-import { Play, SkipBack, Pause } from "lucide-react";
+  Play, SkipBack, Pause
+} from "lucide-react";
+import { ReactNode, useEffect, useRef } from "react";
 
 interface AudioContextMenuProps {
   children: ReactNode;
+  position: { x: number, y: number } | null;
   hasTimestamp: boolean;
   isPlaying: boolean;
   onPlayFromHere: () => void;
   onPlayEarlier: () => void;
   onPause: () => void;
-  position?: { x: number, y: number } | null;
-  onClose?: () => void;
+  onClose: () => void;
 }
 
 export function AudioContextMenu({
   children,
+  position,
   hasTimestamp,
   isPlaying,
   onPlayFromHere,
   onPlayEarlier,
   onPause,
-  position,
   onClose
 }: AudioContextMenuProps) {
-  const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  // Handle custom positioning for right-click context menu
-  useEffect(() => {
-    if (position) {
-      setIsOpen(true);
-      
-      // Close when clicking outside
-      const handleClickOutside = (event: MouseEvent) => {
-        if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-          setIsOpen(false);
-          if (onClose) onClose();
-        }
-      };
-      
-      // Add click listener to document
-      document.addEventListener('mousedown', handleClickOutside);
-      
-      // Clean up
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-      };
-    } else {
-      setIsOpen(false);
-    }
-  }, [position, onClose]);
   
-  // Custom positioned context menu
-  if (position) {
-    return (
+  // Handle click outside to close the menu
+  useEffect(() => {
+    if (!position) return;
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    
+    // Add click listener with a small delay to prevent immediate closing
+    setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 10);
+    
+    // Clean up
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [position, onClose]);
+
+  // If no position, just render the children
+  if (!position) {
+    return <>{children}</>;
+  }
+  
+  // Render the context menu at the specified position
+  return (
+    <>
+      {children}
       <div 
         ref={menuRef}
-        className="absolute z-50 bg-popover text-popover-foreground rounded-md border shadow-md p-1 w-48"
+        className="audio-context-menu"
         style={{
-          display: isOpen ? 'block' : 'none',
           left: `${position.x}px`,
           top: `${position.y}px`,
         }}
       >
-        <div 
-          className={`flex items-center cursor-pointer px-2 py-1.5 text-sm rounded-sm ${!hasTimestamp ? 'opacity-50 pointer-events-none' : 'hover:bg-accent hover:text-accent-foreground'}`}
-          onClick={() => {
-            if (hasTimestamp) {
-              onPlayFromHere();
-              setIsOpen(false);
-              if (onClose) onClose();
-            }
-          }}
-        >
-          <Play className="h-4 w-4 mr-2" />
-          Play from here
-        </div>
-        <div 
-          className={`flex items-center cursor-pointer px-2 py-1.5 text-sm rounded-sm ${!hasTimestamp ? 'opacity-50 pointer-events-none' : 'hover:bg-accent hover:text-accent-foreground'}`}
-          onClick={() => {
-            if (hasTimestamp) {
-              onPlayEarlier();
-              setIsOpen(false);
-              if (onClose) onClose();
-            }
-          }}
-        >
-          <SkipBack className="h-4 w-4 mr-2" />
-          Play 5s earlier
-        </div>
-        <div 
-          className={`flex items-center cursor-pointer px-2 py-1.5 text-sm rounded-sm ${!isPlaying ? 'opacity-50 pointer-events-none' : 'hover:bg-accent hover:text-accent-foreground'}`}
-          onClick={() => {
-            if (isPlaying) {
-              onPause();
-              setIsOpen(false);
-              if (onClose) onClose();
-            }
-          }}
-        >
-          <Pause className="h-4 w-4 mr-2" />
-          Pause
-        </div>
-      </div>
-    );
-  }
-
-  // Regular context menu when using the default right-click behavior
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger>{children}</ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
-        <ContextMenuItem
+        <button 
+          className={`audio-context-menu-item ${!hasTimestamp ? 'disabled' : ''}`}
+          onClick={hasTimestamp ? onPlayFromHere : undefined}
           disabled={!hasTimestamp}
-          onClick={onPlayFromHere}
-          className="flex items-center cursor-pointer"
         >
-          <Play className="h-4 w-4 mr-2" />
-          Play from here
-        </ContextMenuItem>
-        <ContextMenuItem
+          <div className="flex items-center">
+            <Play className="h-4 w-4 mr-2" />
+            Play from here
+          </div>
+        </button>
+        
+        <button 
+          className={`audio-context-menu-item ${!hasTimestamp ? 'disabled' : ''}`}
+          onClick={hasTimestamp ? onPlayEarlier : undefined}
           disabled={!hasTimestamp}
-          onClick={onPlayEarlier}
-          className="flex items-center cursor-pointer"
         >
-          <SkipBack className="h-4 w-4 mr-2" />
-          Play 5s earlier
-        </ContextMenuItem>
-        <ContextMenuItem
+          <div className="flex items-center">
+            <SkipBack className="h-4 w-4 mr-2" />
+            Play 5s earlier
+          </div>
+        </button>
+        
+        <button 
+          className={`audio-context-menu-item ${!isPlaying ? 'disabled' : ''}`}
+          onClick={isPlaying ? onPause : undefined}
           disabled={!isPlaying}
-          onClick={onPause}
-          className="flex items-center cursor-pointer"
         >
-          <Pause className="h-4 w-4 mr-2" />
-          Pause
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+          <div className="flex items-center">
+            <Pause className="h-4 w-4 mr-2" />
+            Pause
+          </div>
+        </button>
+      </div>
+    </>
   );
 }

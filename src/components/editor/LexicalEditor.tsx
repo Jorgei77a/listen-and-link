@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useState, useCallback } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
@@ -143,10 +144,9 @@ export function LexicalEditor({
   const audioRef = externalAudioRef || internalAudioRef;
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [editingMode, setEditingMode] = useState(true);
+  const [editingMode, setEditingMode] = useState(false);
   const [contextMenuPosition, setContextMenuPosition] = useState<{x: number, y: number} | null>(null);
   const [contextMenuTimestamp, setContextMenuTimestamp] = useState<number | null>(null);
-  const [activeTimestampNode, setActiveTimestampNode] = useState<HTMLElement | null>(null);
   
   // Create a stable audio element that won't be recreated
   useEffect(() => {
@@ -177,73 +177,26 @@ export function LexicalEditor({
     setCurrentTime(time);
   }, []);
   
-  // Custom nodes for our editor
-  const initialConfig = {
-    namespace: "TranscriptEditor",
-    theme: {
-      paragraph: cn(
-        "mb-2 last:mb-0",
-        editingMode ? "hover:bg-muted/20" : ""
-      ),
-      text: {
-        bold: "font-bold",
-        italic: "italic",
-        underline: "underline",
-        highlight: "bg-yellow-200",
-      },
-    },
-    onError: (error: Error) => {
-      console.error("Lexical Editor Error:", error);
-    },
-    editable: !readOnly,
-    nodes: [
-      ListNode, 
-      ListItemNode, 
-      HeadingNode,
-      TimestampedTextNode,
-    ],
-  };
-  
-  // Find a timestamp in the clicked context menu location
-  const findTimestampAtPosition = useCallback((x: number, y: number): number | null => {
-    const element = document.elementFromPoint(x, y);
-    if (!element) return null;
-    
-    // Check if the element has a timestamp or find the closest parent with a timestamp
-    const timestampEl = element.hasAttribute('data-timestamp') 
-      ? element 
-      : element.closest('[data-timestamp]');
-      
-    if (timestampEl) {
-      const timestamp = parseFloat(timestampEl.getAttribute('data-timestamp') || '0');
-      setActiveTimestampNode(timestampEl as HTMLElement);
-      return timestamp;
-    }
-    
-    return null;
-  }, []);
-  
   // Handle context menu show
-  const handleShowContextMenu = useCallback((x: number, y: number, hasTimestamp: boolean) => {
-    if (hasTimestamp) {
-      const timestamp = findTimestampAtPosition(x, y);
-      setContextMenuTimestamp(timestamp);
-    } else {
-      setContextMenuTimestamp(null);
-    }
+  const handleShowContextMenu = useCallback((x: number, y: number, hasTimestamp: boolean, timestamp: number | null) => {
     setContextMenuPosition({ x, y });
-  }, [findTimestampAtPosition]);
+    setContextMenuTimestamp(timestamp);
+    
+    // For debugging
+    console.log("Context menu opened at:", x, y, "Has timestamp:", hasTimestamp, "Timestamp:", timestamp);
+  }, []);
   
   // Handle context menu close
   const handleCloseContextMenu = useCallback(() => {
     setContextMenuPosition(null);
     setContextMenuTimestamp(null);
-    setActiveTimestampNode(null);
   }, []);
   
   // Handle play from timestamp context menu action
   const handlePlayFromTimestamp = useCallback(() => {
     if (audioRef.current && contextMenuTimestamp !== null) {
+      console.log("Playing from timestamp:", contextMenuTimestamp);
+      
       // Play from 1 second before the timestamp
       const targetTime = Math.max(0, contextMenuTimestamp - 1.0);
       audioRef.current.currentTime = targetTime;
@@ -256,6 +209,8 @@ export function LexicalEditor({
   // Handle play 5 seconds earlier action
   const handlePlayEarlier = useCallback(() => {
     if (audioRef.current && contextMenuTimestamp !== null) {
+      console.log("Playing from 5s earlier:", contextMenuTimestamp - 5);
+      
       // Play from 6 seconds before the timestamp (1s lead-in + 5s earlier)
       const targetTime = Math.max(0, contextMenuTimestamp - 6.0);
       audioRef.current.currentTime = targetTime;
@@ -268,61 +223,49 @@ export function LexicalEditor({
   // Handle pause action
   const handlePause = useCallback(() => {
     if (audioRef.current) {
+      console.log("Pausing audio");
       audioRef.current.pause();
       setIsPlaying(false);
     }
     handleCloseContextMenu();
   }, [audioRef, handleCloseContextMenu]);
   
-  // Click outside to close context menu
-  useEffect(() => {
-    if (!contextMenuPosition) return;
-    
-    const handleClickOutside = (e: MouseEvent) => {
-      // Don't close if clicking the context menu itself
-      const contextMenu = document.querySelector('.audio-context-menu');
-      if (contextMenu && contextMenu.contains(e.target as Node)) {
-        return;
-      }
-      handleCloseContextMenu();
-    };
-    
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [contextMenuPosition, handleCloseContextMenu]);
-  
-  // Toggle editing mode (with visual cues) vs clean mode (for export)
-  const toggleEditingMode = useCallback(() => {
-    setEditingMode(prev => !prev);
-  }, []);
-
   return (
     <div className={cn("border rounded-md", className)} ref={editorContainerRef}>
-      <LexicalComposer initialConfig={initialConfig}>
+      <LexicalComposer initialConfig={{
+        namespace: "TranscriptEditor",
+        theme: {
+          paragraph: "mb-2 last:mb-0",
+          text: {
+            bold: "font-bold",
+            italic: "italic",
+            underline: "underline",
+            highlight: "bg-yellow-200",
+          },
+        },
+        onError: (error: Error) => {
+          console.error("Lexical Editor Error:", error);
+        },
+        editable: !readOnly,
+        nodes: [
+          ListNode, 
+          ListItemNode, 
+          HeadingNode,
+          TimestampedTextNode,
+        ],
+      }}>
         <div className="flex items-center justify-between px-4 py-2 border-b">
           <EditorToolbar />
-          <Toggle
-            aria-label="Toggle editing mode"
-            pressed={editingMode}
-            onPressedChange={toggleEditingMode}
-          >
-            {editingMode ? "Editing" : "Clean"}
-          </Toggle>
         </div>
         
-        <div className={cn(
-          "relative bg-muted/30 rounded-md",
-          !editingMode && "clean-mode"
-        )}>
+        <div className={cn("relative bg-muted/30 rounded-md")}>
           {!isContentReady && (
             <div className="absolute inset-0 flex items-center justify-center bg-muted/20 z-10 rounded-md">
               <div className="animate-pulse bg-muted rounded-md w-full h-[200px] opacity-30"></div>
             </div>
           )}
           
-          {/* Context menu for custom right-click */}
+          {/* Context menu for right-click */}
           <AudioContextMenu
             position={contextMenuPosition}
             onClose={handleCloseContextMenu}
@@ -363,7 +306,7 @@ export function LexicalEditor({
           isPlaying={isPlaying}
           setIsPlaying={setIsPlaying}
           currentTime={currentTime}
-          editingMode={editingMode}
+          editingMode={true} // Always enable timestamp features regardless of mode
           onContextMenu={handleShowContextMenu}
         />
         
