@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -42,7 +43,6 @@ const Index = () => {
   const [customTitle, setCustomTitle] = useState<string>("");
   const [transcriptionCompleted, setTranscriptionCompleted] = useState(false);
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string>("");
   
   const { updateMonthlyUsage } = useSubscription();
 
@@ -127,17 +127,6 @@ const Index = () => {
             
             setSegments(parsedSegments);
             
-            // Create signed URL for the audio file
-            if (transcriptionData.file_path) {
-              const { data: signedUrl } = await supabase.storage
-                .from('audio_files')
-                .createSignedUrl(transcriptionData.file_path, 3600); // 1 hour expiry
-                
-              if (signedUrl?.signedUrl) {
-                setAudioUrl(signedUrl.signedUrl);
-              }
-            }
-            
             // Store the audio duration - make sure to round it here
             if (transcriptionData.audio_duration) {
               // Round to nearest integer to ensure no decimal places
@@ -181,7 +170,6 @@ const Index = () => {
     setCustomTitle(title || file.name.split('.')[0]);
     setTranscriptionCompleted(false);
     setAudioDuration(null);
-    setAudioUrl("");
     setSegments([]);
     
     if (transcriptionId) {
@@ -196,7 +184,6 @@ const Index = () => {
     setCustomTitle("");
     setTranscriptionCompleted(false);
     setAudioDuration(null);
-    setAudioUrl("");
     setSegments([]);
   };
 
@@ -224,7 +211,6 @@ const Index = () => {
               fileName={currentFileName}
               customTitle={customTitle}
               audioDuration={audioDuration}
-              audioUrl={audioUrl}
               segments={segments}
               onReset={handleReset} 
             />

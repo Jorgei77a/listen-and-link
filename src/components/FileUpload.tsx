@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSubscription } from "@/context/SubscriptionContext";
 import { Badge } from "@/components/ui/badge";
-import { getAudioDuration } from "@/utils/audioUtils";
 import {
   Dialog,
   DialogContent,
@@ -123,19 +122,19 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
     // Set a default title based on file name without extension
     setCustomTitle(file.name.split('.').slice(0, -1).join('.'));
     
-    // Start analyzing the audio duration
+    // Since we're removing audio functionality, we'll simplify the duration detection
     setIsAnalyzingAudio(true);
     setIsDurationEstimated(true);
     
     try {
-      // Get the precise audio duration using Web Audio API
-      const duration = await getAudioDuration(file);
-      setDetectedDuration(duration);
-      setIsDurationEstimated(false);
+      // Instead of using audioUtils, we'll estimate based on file size
+      // This is a very rough estimate (1MB ~= 1 minute of audio at medium quality)
+      const estimatedDuration = (file.size / (1024 * 1024)) * 60;
+      setDetectedDuration(estimatedDuration);
       
       // Check if adding this audio would exceed monthly limits
-      if (userUsage && !checkMonthlyUsage(duration)) {
-        const estimatedMinutes = Math.round(duration / 60);
+      if (userUsage && !checkMonthlyUsage(estimatedDuration)) {
+        const estimatedMinutes = Math.round(estimatedDuration / 60);
         toast.error(
           `This ${estimatedMinutes} minute audio would exceed your monthly limit of ${maxMonthlyMinutes} minutes. Please upgrade your plan.`,
           {
@@ -155,7 +154,7 @@ const FileUpload = ({ onFileUpload, isProcessing }: FileUploadProps) => {
       setDialogOpen(true);
       toast.success(`File "${file.name}" selected`);
     } catch (error) {
-      console.error("Error detecting audio duration:", error);
+      console.error("Error estimating audio duration:", error);
       toast.error("Error analyzing the audio file. Please try again.");
     } finally {
       setIsAnalyzingAudio(false);
