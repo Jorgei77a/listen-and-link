@@ -20,16 +20,79 @@ export function AudioPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const audioRef = useRef<HTMLAudioElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioSourceRef = useRef<string | null>(null);
+  
+  // Create audio element only once
+  useEffect(() => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio();
+      
+      // Set up event listeners
+      audioRef.current.addEventListener('timeupdate', handleTimeUpdate);
+      audioRef.current.addEventListener('loadedmetadata', handleLoadedMetadata);
+      audioRef.current.addEventListener('ended', () => setIsPlaying(false));
+      audioRef.current.addEventListener('pause', () => setIsPlaying(false));
+      audioRef.current.addEventListener('play', () => setIsPlaying(true));
+    }
+    
+    // Cleanup function
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.removeEventListener('timeupdate', handleTimeUpdate);
+        audioRef.current.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        audioRef.current.removeEventListener('ended', () => setIsPlaying(false));
+        audioRef.current.removeEventListener('pause', () => setIsPlaying(false));
+        audioRef.current.removeEventListener('play', () => setIsPlaying(true));
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+  
+  // Handle source changes separately to maintain playback state
+  useEffect(() => {
+    // Only update the source if it has changed
+    if (src !== audioSourceRef.current && audioRef.current) {
+      const wasPlaying = isPlaying;
+      const currentPlaybackTime = audioRef.current.currentTime;
+      
+      // Save current playback position if it's the same audio file with a refreshed URL
+      const isSameAudioWithNewUrl = audioSourceRef.current && 
+        audioSourceRef.current.includes(src.split('?')[0]) || 
+        src.includes(audioSourceRef.current?.split('?')[0] || '');
+      
+      // Update the source
+      audioRef.current.src = src;
+      audioSourceRef.current = src;
+      
+      // Load the new audio
+      audioRef.current.load();
+      
+      // When the metadata is loaded, restore playback if needed
+      if (isSameAudioWithNewUrl && currentPlaybackTime > 0) {
+        const restorePlayback = () => {
+          if (audioRef.current) {
+            audioRef.current.currentTime = currentPlaybackTime;
+            if (wasPlaying) {
+              audioRef.current.play().catch(err => console.error('Failed to restore playback:', err));
+            }
+          }
+          audioRef.current?.removeEventListener('loadedmetadata', restorePlayback);
+        };
+        
+        audioRef.current.addEventListener('loadedmetadata', restorePlayback);
+      }
+    }
+  }, [src, isPlaying]);
 
   const togglePlayPause = () => {
     if (audioRef.current) {
       if (isPlaying) {
         audioRef.current.pause();
       } else {
-        audioRef.current.play();
+        audioRef.current.play().catch(err => console.error('Failed to play audio:', err));
       }
-      setIsPlaying(!isPlaying);
     }
   };
 
@@ -97,13 +160,7 @@ export function AudioPlayer({
 
   return (
     <div className={cn("flex flex-col space-y-2", className)}>
-      <audio
-        ref={audioRef}
-        src={src}
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleLoadedMetadata}
-        onEnded={() => setIsPlaying(false)}
-      />
+      {/* No audio element in JSX - we're managing it via ref instead */}
       
       <div className="flex items-center justify-center space-x-2">
         <Button 
