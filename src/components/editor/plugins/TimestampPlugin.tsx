@@ -53,7 +53,14 @@ export function TimestampPlugin({
     if (audioRef.current && timestamp !== null) {
       const targetTime = Math.max(0, timestamp - leadInOffset + offset);
       audioRef.current.currentTime = targetTime;
-      audioRef.current.play().catch(err => console.error("Audio playback error:", err));
+      
+      // Make sure we catch any playback errors and handle them properly
+      audioRef.current.play().catch(err => {
+        console.error("Audio playback error:", err);
+        // Despite error, we still update the UI as if we're playing
+        // since the audio element will try to play when possible
+      });
+      
       setIsPlaying(true);
       lastClickedTimestamp.current = timestamp;
       
@@ -112,14 +119,39 @@ export function TimestampPlugin({
     );
   }, [editor, playFromTimestamp]);
   
-  // Handle ctrl/alt + click for quick preview
+  // Improved timestamp finding function that checks both the element and its parents
+  const findTimestampInElement = useCallback((element: HTMLElement | null): number | null => {
+    if (!element) return null;
+    
+    // First check if the element itself has a timestamp
+    if (element.hasAttribute('data-timestamp')) {
+      return parseFloat(element.getAttribute('data-timestamp') || '0');
+    }
+    
+    // Then check parent elements for timestamp
+    const timestampEl = element.closest('[data-timestamp]');
+    if (timestampEl) {
+      return parseFloat(timestampEl.getAttribute('data-timestamp') || '0');
+    }
+    
+    return null;
+  }, []);
+  
+  // Handle ctrl/alt + click for quick preview - with improved timestamp detection
   useEffect(() => {
     const handleMouseDown = (e: MouseEvent) => {
       // Check if ctrl key (Windows/Linux) or alt/option key (macOS) is pressed
       if (e.ctrlKey || e.altKey) {
         e.preventDefault();
+        e.stopPropagation();
         
-        // Let editor process this click first to update selection
+        const timestamp = findTimestampInElement(e.target as HTMLElement);
+        if (timestamp !== null) {
+          playFromTimestamp(timestamp);
+          return;
+        }
+        
+        // Fallback to Lexical selection if no direct timestamp found
         setTimeout(() => {
           editor.getEditorState().read(() => {
             const selection = $getSelection();
@@ -138,43 +170,23 @@ export function TimestampPlugin({
       }
     };
     
-    // Find the timestamp in a node
-    const getTimestampFromElement = (element: HTMLElement): number | null => {
-      // First check if the element itself has a timestamp attribute
-      if (element.hasAttribute('data-timestamp')) {
-        return parseFloat(element.getAttribute('data-timestamp') || '0');
-      }
-      
-      // Then check if any parent element has a timestamp attribute
-      const timestampEl = element.closest('[data-timestamp]');
-      if (timestampEl) {
-        return parseFloat(timestampEl.getAttribute('data-timestamp') || '0');
-      }
-      
-      return null;
-    };
-    
-    // Improved context menu handler
+    // Improved context menu handler with better event handling
     const handleContextMenu = (e: MouseEvent) => {
       if (!onContextMenu) return;
       
       e.preventDefault(); // Prevent default browser context menu
-      
-      // Find the timestamp at the clicked position
-      let timestamp: number | null = null;
-      let hasTimestamp = false;
+      e.stopPropagation(); // Stop event from bubbling
       
       // Get the element that was clicked
       const target = e.target as HTMLElement;
-      
-      timestamp = getTimestampFromElement(target);
-      hasTimestamp = timestamp !== null;
+      const timestamp = findTimestampInElement(target);
+      const hasTimestamp = timestamp !== null;
       
       // Call the context menu handler with the mouse position and timestamp info
       onContextMenu(e.pageX, e.pageY, hasTimestamp, timestamp);
     };
     
-    // Touch support for long press
+    // Touch support for long press with improved handling
     const handleTouchStart = (e: TouchEvent) => {
       if (!onContextMenu) return;
       
@@ -190,7 +202,7 @@ export function TimestampPlugin({
         const target = e.target as HTMLElement;
         
         // Find timestamp in the touched element
-        const timestamp = getTimestampFromElement(target);
+        const timestamp = findTimestampInElement(target);
         const hasTimestamp = timestamp !== null;
         
         // Call the context menu handler with the touch position and timestamp info
@@ -225,23 +237,24 @@ export function TimestampPlugin({
     
     const editorElement = editor.getRootElement();
     if (editorElement) {
-      editorElement.addEventListener('mousedown', handleMouseDown);
-      editorElement.addEventListener('contextmenu', handleContextMenu);
-      editorElement.addEventListener('touchstart', handleTouchStart);
-      editorElement.addEventListener('touchmove', handleTouchMove);
-      editorElement.addEventListener('touchend', handleTouchEnd);
+      // Use capture phase (true) to ensure our handlers run before others
+      editorElement.addEventListener('mousedown', handleMouseDown, true);
+      editorElement.addEventListener('contextmenu', handleContextMenu, true);
+      editorElement.addEventListener('touchstart', handleTouchStart, true);
+      editorElement.addEventListener('touchmove', handleTouchMove, true);
+      editorElement.addEventListener('touchend', handleTouchEnd, true);
       
       return () => {
-        editorElement.removeEventListener('mousedown', handleMouseDown);
-        editorElement.removeEventListener('contextmenu', handleContextMenu);
-        editorElement.removeEventListener('touchstart', handleTouchStart);
-        editorElement.removeEventListener('touchmove', handleTouchMove);
-        editorElement.removeEventListener('touchend', handleTouchEnd);
+        editorElement.removeEventListener('mousedown', handleMouseDown, true);
+        editorElement.removeEventListener('contextmenu', handleContextMenu, true);
+        editorElement.removeEventListener('touchstart', handleTouchStart, true);
+        editorElement.removeEventListener('touchmove', handleTouchMove, true);
+        editorElement.removeEventListener('touchend', handleTouchEnd, true);
       };
     }
     
     return () => {};
-  }, [editor, playFromTimestamp, onContextMenu]);
+  }, [editor, playFromTimestamp, onContextMenu, findTimestampInElement]);
   
   // Add visual indicators (faint play icon) for timestamped paragraphs
   useEffect(() => {

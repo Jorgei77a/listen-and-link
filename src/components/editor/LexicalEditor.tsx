@@ -1,5 +1,4 @@
-
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
@@ -140,30 +139,45 @@ export function LexicalEditor({
 }: LexicalEditorProps) {
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const [isContentReady, setIsContentReady] = useState(false);
-  const internalAudioRef = useRef<HTMLAudioElement>(null);
-  const audioRef = externalAudioRef || internalAudioRef;
+  const internalAudioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [editingMode, setEditingMode] = useState(false);
   const [contextMenuPosition, setContextMenuPosition] = useState<{x: number, y: number} | null>(null);
   const [contextMenuTimestamp, setContextMenuTimestamp] = useState<number | null>(null);
   
-  // Create a stable audio element that won't be recreated
-  useEffect(() => {
-    // Only create an audio element if we're using the internal ref
-    if (!externalAudioRef && audioUrl && internalAudioRef.current === null) {
-      const audio = new Audio(audioUrl);
+  // Use the external audio ref if provided, otherwise use the internal ref
+  const audioRef = externalAudioRef || internalAudioRef;
+  
+  // Create a stable audio element using useMemo
+  const stableAudio = useMemo(() => {
+    // Only create new audio element if we're using internal ref
+    // and no audio element exists yet
+    if (!externalAudioRef && !internalAudioRef.current && audioUrl) {
+      const audio = new Audio();
       internalAudioRef.current = audio;
-      
-      // Return cleanup function
-      return () => {
-        audio.pause();
-        if (audio.src && audio.src.startsWith('blob:')) {
-          URL.revokeObjectURL(audio.src);
-        }
-      };
+      return audio;
     }
-  }, [audioUrl, externalAudioRef]);
+    return internalAudioRef.current;
+  }, [externalAudioRef, audioUrl]);
+  
+  // Set audio source only when URL changes
+  useEffect(() => {
+    if (stableAudio && audioUrl && stableAudio.src !== audioUrl) {
+      console.log("Setting audio source to:", audioUrl);
+      stableAudio.src = audioUrl;
+      stableAudio.load();
+    }
+    
+    // Clean up function
+    return () => {
+      if (!externalAudioRef && stableAudio) {
+        stableAudio.pause();
+        if (stableAudio.src && stableAudio.src.startsWith('blob:')) {
+          URL.revokeObjectURL(stableAudio.src);
+        }
+      }
+    };
+  }, [stableAudio, audioUrl, externalAudioRef]);
   
   // Update current time state from external time updates
   useEffect(() => {
@@ -177,12 +191,10 @@ export function LexicalEditor({
     setCurrentTime(time);
   }, []);
   
-  // Handle context menu show
+  // Handle context menu show with improved event handling
   const handleShowContextMenu = useCallback((x: number, y: number, hasTimestamp: boolean, timestamp: number | null) => {
     setContextMenuPosition({ x, y });
     setContextMenuTimestamp(timestamp);
-    
-    // For debugging
     console.log("Context menu opened at:", x, y, "Has timestamp:", hasTimestamp, "Timestamp:", timestamp);
   }, []);
   
@@ -200,7 +212,13 @@ export function LexicalEditor({
       // Play from 1 second before the timestamp
       const targetTime = Math.max(0, contextMenuTimestamp - 1.0);
       audioRef.current.currentTime = targetTime;
-      audioRef.current.play().catch(err => console.error("Audio playback error:", err));
+      
+      audioRef.current.play().catch(err => {
+        console.error("Audio playback error:", err);
+        // We still update UI state since the audio element will 
+        // attempt playback when possible
+      });
+      
       setIsPlaying(true);
     }
     handleCloseContextMenu();
@@ -214,7 +232,12 @@ export function LexicalEditor({
       // Play from 6 seconds before the timestamp (1s lead-in + 5s earlier)
       const targetTime = Math.max(0, contextMenuTimestamp - 6.0);
       audioRef.current.currentTime = targetTime;
-      audioRef.current.play().catch(err => console.error("Audio playback error:", err));
+      
+      audioRef.current.play().catch(err => {
+        console.error("Audio playback error:", err);
+        // We still update UI state
+      });
+      
       setIsPlaying(true);
     }
     handleCloseContextMenu();
@@ -323,12 +346,7 @@ export function LexicalEditor({
         />
       </LexicalComposer>
       
-      {/* Audio player (hidden if external ref is provided) */}
-      {!externalAudioRef && audioUrl && (
-        <div className="mt-4">
-          <audio ref={audioRef} src={audioUrl} style={{ display: 'none' }} />
-        </div>
-      )}
+      {/* No need to render audio element since we're creating it with useMemo */}
     </div>
   );
 }

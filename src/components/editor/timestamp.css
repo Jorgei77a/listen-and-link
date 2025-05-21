@@ -18,6 +18,7 @@
 /* Style for words with timestamps */
 [data-timestamp] {
   position: relative;
+  cursor: pointer;
 }
 
 /* Style for user-added (unsynced) text */
@@ -52,7 +53,7 @@
   transition: background-color 0.2s;
 }
 
-.audio-context-menu-item:hover {
+.audio-context-menu-item:hover:not(.disabled) {
   background-color: #f5f5f5;
 }
 

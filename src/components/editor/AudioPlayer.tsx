@@ -30,25 +30,29 @@ export function AudioPlayer({
   // Use the external ref if provided, otherwise use the internal ref
   const audioRef = externalAudioRef || internalAudioRef;
   
-  // Memoize the audio source URL to prevent recreation
-  const audioSrc = useMemo(() => {
-    // Return the src directly if it's not a blob URL
-    if (!src.startsWith('blob:')) {
-      return src;
+  // Create a stable audio element
+  const stableAudio = useMemo(() => {
+    // Only create new audio element if we're using internal ref
+    // and no audio element exists yet
+    if (!externalAudioRef && !internalAudioRef.current) {
+      const audio = new Audio();
+      internalAudioRef.current = audio;
+      return audio;
     }
-    
-    // For blob URLs, we can't do much since they're already created
-    // In a real implementation, you'd want to cache these at a higher level
-    return src;
-  }, [src]);
+    return audioRef.current;
+  }, [externalAudioRef, audioRef]);
   
-  // Handle audio initialization in a single effect
+  // Memoize the audio source URL to prevent recreation
+  const audioSrc = useMemo(() => src, [src]);
+  
+  // Handle audio source setting only when it changes
   useEffect(() => {
-    const audio = audioRef.current;
+    const audio = stableAudio;
     if (!audio) return;
     
-    // Only set the src attribute once when it changes
+    // Only set the source if it's different from current
     if (audio.src !== audioSrc) {
+      console.log("AudioPlayer: Setting audio source to", audioSrc);
       audio.src = audioSrc;
       
       // Reset state when source changes
@@ -60,19 +64,12 @@ export function AudioPlayer({
       audio.load();
     }
     
-    return () => {
-      // Cleanup only if using internal ref
-      if (!externalAudioRef && src.startsWith('blob:')) {
-        // Revoke object URL only when component unmounts and only for blob URLs
-        // we created internally
-        URL.revokeObjectURL(src);
-      }
-    };
-  }, [audioSrc, audioRef, externalAudioRef, src, onPlayStateChange]);
+    // No need to return cleanup function for src changes
+  }, [audioSrc, stableAudio, onPlayStateChange]);
   
-  // Set up event listeners
+  // Set up event listeners on the stable audio element
   useEffect(() => {
-    const audio = audioRef.current;
+    const audio = stableAudio;
     if (!audio) return;
     
     const handlePlay = () => {
@@ -123,42 +120,42 @@ export function AudioPlayer({
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('ended', handleEnded);
     };
-  }, [audioRef, onTimeUpdate, onJumpToTime, onPlayStateChange]);
+  }, [stableAudio, onTimeUpdate, onJumpToTime, onPlayStateChange]);
 
   const togglePlayPause = useCallback(() => {
-    if (audioRef.current) {
+    if (stableAudio) {
       if (isPlaying) {
-        audioRef.current.pause();
+        stableAudio.pause();
       } else {
-        audioRef.current.play().catch(error => {
+        stableAudio.play().catch(error => {
           console.error('Error playing audio:', error);
         });
       }
     }
-  }, [isPlaying, audioRef]);
+  }, [isPlaying, stableAudio]);
 
   const skipForward = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.currentTime += 5;
+    if (stableAudio) {
+      stableAudio.currentTime += 5;
     }
-  }, [audioRef]);
+  }, [stableAudio]);
 
   const skipBackward = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.currentTime -= 5;
+    if (stableAudio) {
+      stableAudio.currentTime -= 5;
     }
-  }, [audioRef]);
+  }, [stableAudio]);
 
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
     setCurrentTime(time);
-    if (audioRef.current) {
-      audioRef.current.currentTime = time;
+    if (stableAudio) {
+      stableAudio.currentTime = time;
     }
     if (onTimeUpdate) {
       onTimeUpdate(time);
     }
-  }, [audioRef, onTimeUpdate]);
+  }, [stableAudio, onTimeUpdate]);
 
   const formatTime = useCallback((time: number) => {
     const minutes = Math.floor(time / 60);
@@ -166,31 +163,15 @@ export function AudioPlayer({
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   }, []);
 
-  // Define a local function to handle time updates from the audio element
-  const localHandleTimeUpdate = () => {
-    if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
-      if (onTimeUpdate) {
-        onTimeUpdate(audioRef.current.currentTime);
-      }
-    }
-  };
-
-  // Don't create a new audio element on each render
-  // Only render the audio element if using the internal ref
+  // Don't render extra audio elements, rely on the stable audio reference
   return (
     <div className={cn("flex flex-col space-y-2", className)}>
-      {!externalAudioRef && (
+      {/* Only render audio element if using internal ref and no stable audio exists yet */}
+      {!externalAudioRef && !stableAudio && (
         <audio
-          ref={audioRef}
+          ref={internalAudioRef}
           src={audioSrc}
-          onTimeUpdate={localHandleTimeUpdate}  // Changed from handleTimeUpdate to localHandleTimeUpdate
-          onLoadedMetadata={() => {
-            if (audioRef.current) {
-              setDuration(audioRef.current.duration);
-            }
-          }}
-          onEnded={() => setIsPlaying(false)}
+          style={{ display: 'none' }}
         />
       )}
       

@@ -1,5 +1,5 @@
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -10,7 +10,6 @@ import { LexicalEditor } from "@/components/editor/LexicalEditor";
 import { AudioPlayer } from "@/components/editor/AudioPlayer";
 import { ExportOptions } from "@/components/editor/ExportOptions";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
-import { AudioContextMenu } from "@/components/editor/AudioContextMenu";
 
 interface TranscriptionDisplayProps {
   transcript: string;
@@ -64,6 +63,35 @@ const TranscriptionDisplay = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   
+  // Create a stable audio element with useMemo
+  const stableAudio = useMemo(() => {
+    if (!audioRef.current && audioUrl) {
+      const audio = new Audio();
+      audioRef.current = audio;
+      return audio;
+    }
+    return audioRef.current;
+  }, [audioUrl]);
+  
+  // Set audio source when URL changes
+  useEffect(() => {
+    if (stableAudio && audioUrl && stableAudio.src !== audioUrl) {
+      console.log("TranscriptionDisplay: Setting audio source to", audioUrl);
+      stableAudio.src = audioUrl;
+      stableAudio.load();
+    }
+    
+    // Clean up function
+    return () => {
+      if (stableAudio) {
+        stableAudio.pause();
+        if (stableAudio.src && stableAudio.src.startsWith('blob:')) {
+          URL.revokeObjectURL(stableAudio.src);
+        }
+      }
+    };
+  }, [stableAudio, audioUrl]);
+  
   const displayTitle = customTitle || fileName.split('.')[0];
 
   const handleCopy = () => {
@@ -90,22 +118,6 @@ const TranscriptionDisplay = ({
   const handlePlayStateChange = (playing: boolean) => {
     setIsPlaying(playing);
   };
-
-  // Create stable audio element
-  useEffect(() => {
-    if (audioUrl && !audioRef.current) {
-      audioRef.current = new Audio(audioUrl);
-    }
-    
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        if (audioRef.current.src && audioRef.current.src.startsWith('blob:')) {
-          URL.revokeObjectURL(audioRef.current.src);
-        }
-      }
-    };
-  }, [audioUrl]);
 
   // Extract statistics from the transcript
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
