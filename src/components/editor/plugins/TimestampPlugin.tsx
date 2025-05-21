@@ -1,4 +1,3 @@
-
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { useCallback, useEffect, useState, useRef } from "react";
 import { 
@@ -18,6 +17,7 @@ import { MiniPlayerBubble } from "../MiniPlayerBubble";
 import { mergeRegister } from "@lexical/utils";
 import { createPortal } from "react-dom";
 import { AudioContextMenu } from "../AudioContextMenu";
+import { Play, SkipBack, Pause, Info } from "lucide-react";
 
 export const PLAY_AUDIO_FROM_TIMESTAMP_COMMAND: LexicalCommand<{
   nodeKey: NodeKey;
