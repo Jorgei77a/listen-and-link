@@ -16,6 +16,7 @@ import {
 import { $isTimestampedTextNode } from "../nodes/TimestampedTextNode";
 import { MiniPlayerBubble } from "../MiniPlayerBubble";
 import { mergeRegister } from "@lexical/utils";
+import { Play, SkipBack, Pause, Info } from "lucide-react"; // Add missing imports
 
 export const PLAY_AUDIO_FROM_TIMESTAMP_COMMAND: LexicalCommand<{
   nodeKey: NodeKey;
@@ -29,6 +30,7 @@ interface TimestampPluginProps {
   currentTime: number;
   leadInOffset?: number;
   editingMode: boolean;
+  onContextMenu?: (x: number, y: number, hasTimestamp: boolean) => void;
 }
 
 export function TimestampPlugin({
@@ -37,12 +39,16 @@ export function TimestampPlugin({
   setIsPlaying,
   currentTime,
   leadInOffset = 1.0,
-  editingMode
+  editingMode,
+  onContextMenu
 }: TimestampPluginProps) {
   const [editor] = useLexicalComposerContext();
   const [showBubble, setShowBubble] = useState(false);
   const [bubblePosition, setBubblePosition] = useState({ x: 0, y: 0 });
   const lastClickedTimestamp = useRef<number | null>(null);
+  // Add ref to track if a long press is in progress
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const touchStartPos = useRef<{x: number, y: number} | null>(null);
 
   const playFromTimestamp = useCallback((timestamp: number, offset: number = 0) => {
     if (audioRef.current && timestamp !== null) {
@@ -135,16 +141,116 @@ export function TimestampPlugin({
       }
     };
     
+    // Add handler for right-click / context menu
+    const handleContextMenu = (e: MouseEvent) => {
+      if (!editingMode || !onContextMenu) return;
+      
+      // Let's check if the node under the cursor has a timestamp
+      let hasTimestamp = false;
+      
+      editor.getEditorState().read(() => {
+        // Get the DOM node that was right-clicked
+        // We'll use this to find the corresponding Lexical node
+        const domNode = e.target as Node;
+        
+        // Get the selection based on where the user clicked
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) return;
+        
+        // Try to find a timestamped node in the current selection or parent hierarchy
+        if (selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          const node = range.startContainer.parentElement;
+          
+          // Check if the clicked element or its parent has a data-timestamp attribute
+          if (node) {
+            hasTimestamp = node.hasAttribute('data-timestamp') || 
+                          node.parentElement?.hasAttribute('data-timestamp') ||
+                          node.closest('[data-timestamp]') !== null;
+          }
+        }
+      });
+      
+      // Prevent the default browser context menu
+      e.preventDefault();
+      
+      // Call the context menu handler with the mouse position and timestamp info
+      onContextMenu(
+        e.pageX, 
+        e.pageY,
+        hasTimestamp
+      );
+    };
+    
+    // Touch support for long press - simulate context menu
+    const handleTouchStart = (e: TouchEvent) => {
+      if (!editingMode || !onContextMenu) return;
+      
+      // Store touch start position
+      const touch = e.touches[0];
+      touchStartPos.current = { x: touch.pageX, y: touch.pageY };
+      
+      // Start a timer for long press detection
+      longPressTimer.current = setTimeout(() => {
+        if (!touchStartPos.current) return;
+        
+        // Check if the touch target has a timestamp
+        let hasTimestamp = false;
+        const touchTarget = e.target as HTMLElement;
+        
+        if (touchTarget) {
+          hasTimestamp = touchTarget.hasAttribute('data-timestamp') || 
+                         touchTarget.closest('[data-timestamp]') !== null;
+        }
+        
+        // Call the context menu handler
+        onContextMenu(
+          touchStartPos.current.x,
+          touchStartPos.current.y,
+          hasTimestamp
+        );
+        
+        // Clear the touch position
+        touchStartPos.current = null;
+      }, 500); // 500ms is a common duration for long press
+    };
+    
+    const handleTouchMove = (e: TouchEvent) => {
+      // If the user moves their finger, cancel the long press timer
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    };
+    
+    const handleTouchEnd = () => {
+      // Cancel the long press timer if the user lifts their finger
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      touchStartPos.current = null;
+    };
+    
     const editorElement = editor.getRootElement();
     if (editorElement) {
       editorElement.addEventListener('mousedown', handleMouseDown);
+      editorElement.addEventListener('contextmenu', handleContextMenu);
+      editorElement.addEventListener('touchstart', handleTouchStart);
+      editorElement.addEventListener('touchmove', handleTouchMove);
+      editorElement.addEventListener('touchend', handleTouchEnd);
+      
       return () => {
         editorElement.removeEventListener('mousedown', handleMouseDown);
+        editorElement.removeEventListener('contextmenu', handleContextMenu);
+        editorElement.removeEventListener('touchstart', handleTouchStart);
+        editorElement.removeEventListener('touchmove', handleTouchMove);
+        editorElement.removeEventListener('touchend', handleTouchEnd);
       };
     }
     
     return () => {};
-  }, [editor, playFromTimestamp, editingMode]);
+  }, [editor, playFromTimestamp, editingMode, onContextMenu]);
   
   // Add visual indicators (faint play icon) for timestamped paragraphs
   useEffect(() => {
