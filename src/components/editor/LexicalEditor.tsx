@@ -1,12 +1,12 @@
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { ListItemNode, ListNode } from "@lexical/list";
-import { HeadingNode } from "@lexical/rich-text"; // Add import for HeadingNode
+import { HeadingNode } from "@lexical/rich-text";
 import LexicalErrorBoundary from "@lexical/react/LexicalErrorBoundary";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { EditorToolbar } from "./EditorToolbar";
@@ -18,10 +18,16 @@ import {
   LexicalEditor as LexicalEditorType,
   ParagraphNode,
   LexicalNode,
-  $isRootNode
+  $isRootNode,
+  TextNode
 } from "lexical";
 import { cn } from "@/lib/utils";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
+import { TimestampPlugin } from "./plugins/TimestampPlugin";
+import { AudioContextMenu } from "./AudioContextMenu";
+import { TimestampedTextNode, $createTimestampedTextNode } from "./nodes/TimestampedTextNode";
+import "./timestamp.css";
+import { Toggle } from "@/components/ui/toggle";
 
 interface LexicalEditorProps {
   initialText: string;
@@ -35,40 +41,8 @@ interface LexicalEditorProps {
   onEditorMount?: (editor: LexicalEditorType) => void;
   onEditorChange?: (editorState: EditorState) => void;
   currentTimeInSeconds?: number | null;
-}
-
-// Create a custom interface to handle our timestamps
-interface TimestampData {
-  start: string;
-  end: string;
-}
-
-// Add a type declaration for our extended ParagraphNode
-declare module 'lexical' {
-  interface ParagraphNode {
-    timestampData?: TimestampData;
-  }
-  
-  interface LexicalNode {
-    timestampData?: TimestampData;
-  }
-}
-
-function createTextSegments(text: string, segments?: LexicalEditorProps['segments']): Array<{ text: string; start?: number; end?: number }> {
-  // If we have segments with timestamps, use them
-  if (segments && segments.length > 0) {
-    return segments.map(segment => ({
-      text: segment.text,
-      start: segment.start,
-      end: segment.end,
-    }));
-  }
-  
-  // Otherwise, split by sentences (simple implementation)
-  return text
-    .split(/(?<=[.!?])\s+/)
-    .filter(Boolean)
-    .map(sentence => ({ text: sentence.trim() }));
+  audioRef?: React.RefObject<HTMLAudioElement>;
+  audioUrl?: string;
 }
 
 // This component initializes content after the editor has mounted
@@ -100,49 +74,47 @@ function InitializeContent({
           root.clear();
           
           // Split the text into segments
-          const textSegments = createTextSegments(initialText, segments);
-          
-          // Create paragraph nodes for each segment
-          textSegments.forEach((segment) => {
+          if (segments && segments.length > 0) {
+            // For segments with timestamps
+            segments.forEach((segment) => {
+              const paragraphNode = $createParagraphNode();
+              
+              // Split the segment text into words and create timestamped text nodes
+              const words = segment.text.split(/\s+/);
+              const wordCount = words.length;
+              
+              words.forEach((word, idx) => {
+                // Calculate a proportional timestamp for each word
+                // This is a simplification - in reality you'd want more accurate word-level timestamps
+                const wordPosition = idx / wordCount;
+                const wordTimestamp = segment.start + 
+                  wordPosition * (segment.end - segment.start);
+                
+                // Create a timestamped text node for the word
+                const textNode = $createTimestampedTextNode(word, wordTimestamp);
+                paragraphNode.append(textNode);
+                
+                // Add space between words (except for the last word)
+                if (idx < wordCount - 1) {
+                  const spaceNode = $createTimestampedTextNode(" ", wordTimestamp);
+                  paragraphNode.append(spaceNode);
+                }
+              });
+              
+              root.append(paragraphNode);
+            });
+          } else {
+            // Fallback for no segments - just use the full text as regular paragraph
             const paragraphNode = $createParagraphNode();
-            
-            // Add timestamp data if available
-            if (segment.start !== undefined && segment.end !== undefined) {
-              // Store timestamp data on the node using a custom property
-              (paragraphNode as ParagraphNode).timestampData = {
-                start: segment.start.toString(),
-                end: segment.end.toString()
-              };
-            }
-            
-            const textNode = $createTextNode(segment.text);
+            const textNode = $createTextNode(initialText);
             paragraphNode.append(textNode);
             root.append(paragraphNode);
-          });
+          }
         });
         
-        // Apply timestamp attributes to DOM
-        setTimeout(() => {
-          editor.getEditorState().read(() => {
-            const root = $getRoot();
-            const paragraphs = root.getChildren();
-            
-            paragraphs.forEach((paragraph) => {
-              const timestampData = (paragraph as any).timestampData;
-              if (timestampData) {
-                const element = editor.getElementByKey(paragraph.getKey());
-                if (element) {
-                  element.setAttribute('data-start', timestampData.start);
-                  element.setAttribute('data-end', timestampData.end);
-                }
-              }
-            });
-          });
-          
-          // Finally set as initialized and notify parent
-          setIsInitialized(true);
-          if (onReady) onReady();
-        }, 50);
+        // Mark as initialized and notify parent
+        setIsInitialized(true);
+        if (onReady) onReady();
       } catch (error) {
         console.error("Error initializing Lexical editor content:", error);
         setIsInitialized(true); // Mark as initialized even on error to prevent retries
@@ -155,45 +127,6 @@ function InitializeContent({
   return null;
 }
 
-// Component to handle timestamp highlighting based on current audio time
-function TimestampHighlighter({ currentTimeInSeconds }: { currentTimeInSeconds?: number | null }) {
-  const [editor] = useLexicalComposerContext();
-  
-  useEffect(() => {
-    if (!currentTimeInSeconds || !editor) return;
-    
-    editor.update(() => {
-      const root = $getRoot();
-      const paragraphs = root.getChildren();
-      
-      paragraphs.forEach((paragraph) => {
-        const element = editor.getElementByKey(paragraph.getKey());
-        if (!element) return;
-        
-        // Check if this paragraph has timestamp data attributes
-        const start = parseFloat(element.getAttribute('data-start') || '0');
-        const end = parseFloat(element.getAttribute('data-end') || '0');
-        
-        if (start <= currentTimeInSeconds && currentTimeInSeconds <= end) {
-          element.classList.add('bg-primary/10', 'transition-colors');
-          
-          // Scroll into view if needed
-          const rect = element.getBoundingClientRect();
-          const parentRect = element.parentElement?.getBoundingClientRect();
-          
-          if (parentRect && (rect.bottom > parentRect.bottom || rect.top < parentRect.top)) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        } else {
-          element.classList.remove('bg-primary/10');
-        }
-      });
-    });
-  }, [currentTimeInSeconds, editor]);
-  
-  return null;
-}
-
 export function LexicalEditor({
   initialText,
   segments,
@@ -202,23 +135,54 @@ export function LexicalEditor({
   onEditorMount,
   onEditorChange,
   currentTimeInSeconds,
+  audioRef: externalAudioRef,
+  audioUrl
 }: LexicalEditorProps) {
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const [isContentReady, setIsContentReady] = useState(false);
+  const internalAudioRef = useRef<HTMLAudioElement>(null);
+  const audioRef = externalAudioRef || internalAudioRef;
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [editingMode, setEditingMode] = useState(true);
   
+  // Create a stable audio element that won't be recreated
+  useEffect(() => {
+    // Only create an audio element if we're using the internal ref
+    if (!externalAudioRef && audioUrl && internalAudioRef.current === null) {
+      const audio = new Audio(audioUrl);
+      internalAudioRef.current = audio;
+      
+      // Return cleanup function
+      return () => {
+        audio.pause();
+        if (audio.src && audio.src.startsWith('blob:')) {
+          URL.revokeObjectURL(audio.src);
+        }
+      };
+    }
+  }, [audioUrl, externalAudioRef]);
+  
+  // Update current time state from external time updates
+  useEffect(() => {
+    if (currentTimeInSeconds !== undefined && currentTimeInSeconds !== null) {
+      setCurrentTime(currentTimeInSeconds);
+    }
+  }, [currentTimeInSeconds]);
+  
+  // Handle time updates from the audio element
+  const handleTimeUpdate = useCallback((time: number) => {
+    setCurrentTime(time);
+  }, []);
+  
+  // Custom nodes for our editor
   const initialConfig = {
     namespace: "TranscriptEditor",
     theme: {
-      paragraph: "mb-2 last:mb-0",
-      heading: {
-        h1: "text-2xl font-bold mb-2",
-        h2: "text-xl font-bold mb-2",
-        h3: "text-lg font-bold mb-2",
-      },
-      list: {
-        ul: "list-disc ml-6 mb-2",
-        ol: "list-decimal ml-6 mb-2",
-      },
+      paragraph: cn(
+        "mb-2 last:mb-0",
+        editingMode ? "hover:bg-muted/20" : ""
+      ),
       text: {
         bold: "font-bold",
         italic: "italic",
@@ -230,14 +194,67 @@ export function LexicalEditor({
       console.error("Lexical Editor Error:", error);
     },
     editable: !readOnly,
-    nodes: [ListNode, ListItemNode, HeadingNode], // Add HeadingNode to the nodes array
+    nodes: [
+      ListNode, 
+      ListItemNode, 
+      HeadingNode,
+      TimestampedTextNode, // Add our custom timestamp node
+    ],
   };
+  
+  // Handle play from timestamp context menu action
+  const handlePlayFromTimestamp = useCallback((timestamp: number) => {
+    if (audioRef.current && timestamp !== null) {
+      // Play from 1 second before the timestamp
+      const targetTime = Math.max(0, timestamp - 1.0);
+      audioRef.current.currentTime = targetTime;
+      audioRef.current.play().catch(err => console.error("Audio playback error:", err));
+      setIsPlaying(true);
+    }
+  }, [audioRef]);
+  
+  // Handle play 5 seconds earlier action
+  const handlePlayEarlier = useCallback((timestamp: number) => {
+    if (audioRef.current && timestamp !== null) {
+      // Play from 6 seconds before the timestamp (1s lead-in + 5s earlier)
+      const targetTime = Math.max(0, timestamp - 6.0);
+      audioRef.current.currentTime = targetTime;
+      audioRef.current.play().catch(err => console.error("Audio playback error:", err));
+      setIsPlaying(true);
+    }
+  }, [audioRef]);
+  
+  // Handle pause action
+  const handlePause = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
+  }, [audioRef]);
+  
+  // Toggle editing mode (with visual cues) vs clean mode (for export)
+  const toggleEditingMode = useCallback(() => {
+    setEditingMode(prev => !prev);
+  }, []);
 
   return (
     <div className={cn("border rounded-md", className)} ref={editorContainerRef}>
       <LexicalComposer initialConfig={initialConfig}>
-        <EditorToolbar />
-        <div className="relative bg-muted/30 rounded-md">
+        <div className="flex items-center justify-between px-4 py-2 border-b">
+          <EditorToolbar />
+          <Toggle
+            aria-label="Toggle editing mode"
+            pressed={editingMode}
+            onPressedChange={toggleEditingMode}
+          >
+            {editingMode ? "Editing" : "Clean"}
+          </Toggle>
+        </div>
+        
+        <div className={cn(
+          "relative bg-muted/30 rounded-md",
+          !editingMode && "clean-mode"
+        )}>
           {!isContentReady && (
             <div className="absolute inset-0 flex items-center justify-center bg-muted/20 z-10 rounded-md">
               <div className="animate-pulse bg-muted rounded-md w-full h-[200px] opacity-30"></div>
@@ -247,7 +264,11 @@ export function LexicalEditor({
             contentEditable={
               <ContentEditable className="min-h-[200px] max-h-[400px] overflow-y-auto p-4 outline-none" />
             }
-            placeholder={<div className="absolute top-[15px] left-[15px] text-muted-foreground">Start editing...</div>}
+            placeholder={
+              <div className="absolute top-[15px] left-[15px] text-muted-foreground">
+                Start editing...
+              </div>
+            }
             ErrorBoundary={LexicalErrorBoundary}
           />
         </div>
@@ -263,10 +284,14 @@ export function LexicalEditor({
           }}
         />
         
-        {/* Handle timestamp highlighting */}
-        {currentTimeInSeconds !== undefined && (
-          <TimestampHighlighter currentTimeInSeconds={currentTimeInSeconds} />
-        )}
+        {/* Add our timestamp plugin */}
+        <TimestampPlugin
+          audioRef={audioRef}
+          isPlaying={isPlaying}
+          setIsPlaying={setIsPlaying}
+          currentTime={currentTime}
+          editingMode={editingMode}
+        />
         
         <OnChangePlugin
           onChange={(editorState, editor) => {
@@ -280,6 +305,13 @@ export function LexicalEditor({
           }}
         />
       </LexicalComposer>
+      
+      {/* Audio player (hidden if external ref is provided) */}
+      {!externalAudioRef && audioUrl && (
+        <div className="mt-4">
+          <audio ref={audioRef} src={audioUrl} style={{ display: 'none' }} />
+        </div>
+      )}
     </div>
   );
 }

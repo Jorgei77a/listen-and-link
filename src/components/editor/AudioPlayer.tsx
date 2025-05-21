@@ -1,5 +1,5 @@
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Play, Pause, SkipBack, SkipForward } from "lucide-react";
@@ -9,58 +9,147 @@ interface AudioPlayerProps {
   className?: string;
   onTimeUpdate?: (currentTime: number) => void;
   onJumpToTime?: (time: number) => void;
+  onPlayStateChange?: (isPlaying: boolean) => void;
+  audioRef?: React.RefObject<HTMLAudioElement>;
 }
 
 export function AudioPlayer({ 
   src, 
   className,
   onTimeUpdate,
-  onJumpToTime
+  onJumpToTime,
+  onPlayStateChange,
+  audioRef: externalAudioRef
 }: AudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const audioRef = useRef<HTMLAudioElement>(null);
+  
+  // Create a local audio ref if no external ref is provided
+  const internalAudioRef = useRef<HTMLAudioElement>(null);
+  // Use the external ref if provided, otherwise use the internal ref
+  const audioRef = externalAudioRef || internalAudioRef;
+  
+  // Memoize the audio source URL to prevent recreation
+  const audioSrc = useMemo(() => {
+    // Return the src directly if it's not a blob URL
+    if (!src.startsWith('blob:')) {
+      return src;
+    }
+    
+    // For blob URLs, we can't do much since they're already created
+    // In a real implementation, you'd want to cache these at a higher level
+    return src;
+  }, [src]);
+  
+  // Handle audio initialization in a single effect
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    
+    // Only set the src attribute once when it changes
+    if (audio.src !== audioSrc) {
+      audio.src = audioSrc;
+      
+      // Reset state when source changes
+      setCurrentTime(0);
+      setIsPlaying(false);
+      if (onPlayStateChange) onPlayStateChange(false);
+      
+      // Load the new source
+      audio.load();
+    }
+    
+    return () => {
+      // Cleanup only if using internal ref
+      if (!externalAudioRef && src.startsWith('blob:')) {
+        // Revoke object URL only when component unmounts and only for blob URLs
+        // we created internally
+        URL.revokeObjectURL(src);
+      }
+    };
+  }, [audioSrc, audioRef, externalAudioRef, src, onPlayStateChange]);
+  
+  // Set up event listeners
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    
+    const handlePlay = () => {
+      setIsPlaying(true);
+      if (onPlayStateChange) onPlayStateChange(true);
+    };
+    
+    const handlePause = () => {
+      setIsPlaying(false);
+      if (onPlayStateChange) onPlayStateChange(false);
+    };
+    
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+      if (onTimeUpdate) {
+        onTimeUpdate(audio.currentTime);
+      }
+    };
+    
+    const handleLoadedMetadata = () => {
+      setDuration(audio.duration);
+      // Ensure currentTime is set correctly, accommodating cached values
+      setCurrentTime(audio.currentTime);
+    };
+    
+    const handleEnded = () => {
+      setIsPlaying(false);
+      if (onPlayStateChange) onPlayStateChange(false);
+    };
+    
+    // Add event listeners
+    audio.addEventListener('play', handlePlay);
+    audio.addEventListener('pause', handlePause);
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('ended', handleEnded);
+    
+    // Handle any jump requests
+    if (onJumpToTime) {
+      // Implementation would be at component usage level
+    }
+    
+    // Cleanup listeners to prevent memory leaks
+    return () => {
+      audio.removeEventListener('play', handlePlay);
+      audio.removeEventListener('pause', handlePause);
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('ended', handleEnded);
+    };
+  }, [audioRef, onTimeUpdate, onJumpToTime, onPlayStateChange]);
 
-  const togglePlayPause = () => {
+  const togglePlayPause = useCallback(() => {
     if (audioRef.current) {
       if (isPlaying) {
         audioRef.current.pause();
       } else {
-        audioRef.current.play();
+        audioRef.current.play().catch(error => {
+          console.error('Error playing audio:', error);
+        });
       }
-      setIsPlaying(!isPlaying);
     }
-  };
+  }, [isPlaying, audioRef]);
 
-  const skipForward = () => {
+  const skipForward = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.currentTime += 5;
     }
-  };
+  }, [audioRef]);
 
-  const skipBackward = () => {
+  const skipBackward = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.currentTime -= 5;
     }
-  };
+  }, [audioRef]);
 
-  const handleTimeUpdate = () => {
-    if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
-      if (onTimeUpdate) {
-        onTimeUpdate(audioRef.current.currentTime);
-      }
-    }
-  };
-
-  const handleLoadedMetadata = () => {
-    if (audioRef.current) {
-      setDuration(audioRef.current.duration);
-    }
-  };
-
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
     setCurrentTime(time);
     if (audioRef.current) {
@@ -69,30 +158,31 @@ export function AudioPlayer({
     if (onTimeUpdate) {
       onTimeUpdate(time);
     }
-  };
+  }, [audioRef, onTimeUpdate]);
 
-  const formatTime = (time: number) => {
+  const formatTime = useCallback((time: number) => {
     const minutes = Math.floor(time / 60);
     const seconds = Math.floor(time % 60);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
+  }, []);
 
-  // Effect to handle external time jumps
-  useEffect(() => {
-    if (onJumpToTime) {
-      return () => {}; // This effect just sets up the callback
-    }
-  }, [onJumpToTime]);
-
+  // Don't create a new audio element on each render
+  // Only render the audio element if using the internal ref
   return (
     <div className={cn("flex flex-col space-y-2", className)}>
-      <audio
-        ref={audioRef}
-        src={src}
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleLoadedMetadata}
-        onEnded={() => setIsPlaying(false)}
-      />
+      {!externalAudioRef && (
+        <audio
+          ref={audioRef}
+          src={audioSrc}
+          onTimeUpdate={handleTimeUpdate}
+          onLoadedMetadata={() => {
+            if (audioRef.current) {
+              setDuration(audioRef.current.duration);
+            }
+          }}
+          onEnded={() => setIsPlaying(false)}
+        />
+      )}
       
       <div className="flex items-center justify-center space-x-2">
         <Button 

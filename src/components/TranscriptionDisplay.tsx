@@ -10,7 +10,7 @@ import { LexicalEditor } from "@/components/editor/LexicalEditor";
 import { AudioPlayer } from "@/components/editor/AudioPlayer";
 import { ExportOptions } from "@/components/editor/ExportOptions";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
-import { useSubscription } from "@/context/SubscriptionContext";
+import { AudioContextMenu } from "@/components/editor/AudioContextMenu";
 
 interface TranscriptionDisplayProps {
   transcript: string;
@@ -61,6 +61,8 @@ const TranscriptionDisplay = ({
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [editorReady, setEditorReady] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
@@ -84,11 +86,26 @@ const TranscriptionDisplay = ({
   const handleTimeUpdate = (time: number) => {
     setCurrentTime(time);
   };
-
-  const jumpToTime = (time: number) => {
-    // This would be called when clicking on a paragraph with a timestamp
-    setCurrentTime(time);
+  
+  const handlePlayStateChange = (playing: boolean) => {
+    setIsPlaying(playing);
   };
+
+  // Create stable audio element
+  useEffect(() => {
+    if (audioUrl && !audioRef.current) {
+      audioRef.current = new Audio(audioUrl);
+    }
+    
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        if (audioRef.current.src && audioRef.current.src.startsWith('blob:')) {
+          URL.revokeObjectURL(audioRef.current.src);
+        }
+      }
+    };
+  }, [audioUrl]);
 
   // Extract statistics from the transcript
   const wordCount = transcript.split(/\s+/).filter(Boolean).length;
@@ -142,7 +159,7 @@ const TranscriptionDisplay = ({
           )}
         </div>
 
-        {/* Lexical Editor */}
+        {/* Lexical Editor with audio integration */}
         <LexicalEditor 
           initialText={transcript}
           segments={segments}
@@ -150,6 +167,8 @@ const TranscriptionDisplay = ({
           onEditorMount={handleEditorMount}
           onEditorChange={handleEditorChange}
           currentTimeInSeconds={currentTime}
+          audioRef={audioRef}
+          audioUrl={audioUrl}
         />
         
         {/* Audio Player */}
@@ -157,8 +176,9 @@ const TranscriptionDisplay = ({
           <div className="mt-4">
             <AudioPlayer 
               src={audioUrl} 
+              audioRef={audioRef}
               onTimeUpdate={handleTimeUpdate} 
-              onJumpToTime={jumpToTime}
+              onPlayStateChange={handlePlayStateChange}
             />
           </div>
         )}
