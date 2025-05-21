@@ -3,11 +3,10 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuTrigger,
-  ContextMenuSeparator
+  ContextMenuTrigger 
 } from "@/components/ui/context-menu";
 import { ReactNode } from "react";
-import { Play, SkipBack, Pause, Info } from "lucide-react";
+import { Play, SkipBack, Pause } from "lucide-react";
 
 interface AudioContextMenuProps {
   children: ReactNode;
@@ -16,8 +15,6 @@ interface AudioContextMenuProps {
   onPlayFromHere: () => void;
   onPlayEarlier: () => void;
   onPause: () => void;
-  className?: string;
-  onContextMenu?: (e: React.MouseEvent) => void; // Add this to handle manual context menu opening
 }
 
 export function AudioContextMenu({
@@ -26,17 +23,11 @@ export function AudioContextMenu({
   isPlaying,
   onPlayFromHere,
   onPlayEarlier,
-  onPause,
-  className,
-  onContextMenu
+  onPause
 }: AudioContextMenuProps) {
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild onContextMenu={onContextMenu}>
-        <div className={className}>
-          {children}
-        </div>
-      </ContextMenuTrigger>
+      <ContextMenuTrigger>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-48">
         <ContextMenuItem
           disabled={!hasTimestamp}
@@ -62,15 +53,6 @@ export function AudioContextMenu({
           <Pause className="h-4 w-4 mr-2" />
           Pause
         </ContextMenuItem>
-        {!hasTimestamp && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem disabled className="flex items-center text-muted-foreground">
-              <Info className="h-4 w-4 mr-2" />
-              No original audio for this text
-            </ContextMenuItem>
-          </>
-        )}
       </ContextMenuContent>
     </ContextMenu>
   );
