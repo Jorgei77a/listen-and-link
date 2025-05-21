@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+
+import { useEffect, useRef, useState } from "react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
@@ -15,18 +16,12 @@ import {
   $createTextNode, 
   EditorState, 
   LexicalEditor as LexicalEditorType,
-  ParagraphNode,
-  LexicalNode,
   $isRootNode,
   TextNode
 } from "lexical";
 import { cn } from "@/lib/utils";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
-import { TimestampPlugin } from "./plugins/TimestampPlugin";
-import { AudioContextMenu } from "./AudioContextMenu";
-import { TimestampedTextNode, $createTimestampedTextNode } from "./nodes/TimestampedTextNode";
 import "./timestamp.css";
-import { Toggle } from "@/components/ui/toggle";
 
 interface LexicalEditorProps {
   initialText: string;
@@ -39,9 +34,6 @@ interface LexicalEditorProps {
   readOnly?: boolean;
   onEditorMount?: (editor: LexicalEditorType) => void;
   onEditorChange?: (editorState: EditorState) => void;
-  currentTimeInSeconds?: number | null;
-  audioRef?: React.RefObject<HTMLAudioElement>;
-  audioUrl?: string;
 }
 
 // This component initializes content after the editor has mounted
@@ -74,32 +66,11 @@ function InitializeContent({
           
           // Split the text into segments
           if (segments && segments.length > 0) {
-            // For segments with timestamps
+            // For segments with timestamps (now just regular paragraphs)
             segments.forEach((segment) => {
               const paragraphNode = $createParagraphNode();
-              
-              // Split the segment text into words and create timestamped text nodes
-              const words = segment.text.split(/\s+/);
-              const wordCount = words.length;
-              
-              words.forEach((word, idx) => {
-                // Calculate a proportional timestamp for each word
-                // This is a simplification - in reality you'd want more accurate word-level timestamps
-                const wordPosition = idx / wordCount;
-                const wordTimestamp = segment.start + 
-                  wordPosition * (segment.end - segment.start);
-                
-                // Create a timestamped text node for the word
-                const textNode = $createTimestampedTextNode(word, wordTimestamp);
-                paragraphNode.append(textNode);
-                
-                // Add space between words (except for the last word)
-                if (idx < wordCount - 1) {
-                  const spaceNode = $createTimestampedTextNode(" ", wordTimestamp);
-                  paragraphNode.append(spaceNode);
-                }
-              });
-              
+              const textNode = $createTextNode(segment.text);
+              paragraphNode.append(textNode);
               root.append(paragraphNode);
             });
           } else {
@@ -132,126 +103,10 @@ export function LexicalEditor({
   className,
   readOnly = false,
   onEditorMount,
-  onEditorChange,
-  currentTimeInSeconds,
-  audioRef: externalAudioRef,
-  audioUrl
+  onEditorChange
 }: LexicalEditorProps) {
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const [isContentReady, setIsContentReady] = useState(false);
-  const internalAudioRef = useRef<HTMLAudioElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [contextMenuPosition, setContextMenuPosition] = useState<{x: number, y: number} | null>(null);
-  const [contextMenuTimestamp, setContextMenuTimestamp] = useState<number | null>(null);
-  
-  // Use the external audio ref if provided, otherwise use the internal ref
-  const audioRef = externalAudioRef || internalAudioRef;
-  
-  // Create a stable audio element using useMemo
-  const stableAudio = useMemo(() => {
-    // Only create new audio element if we're using internal ref
-    // and no audio element exists yet
-    if (!externalAudioRef && !internalAudioRef.current && audioUrl) {
-      const audio = new Audio();
-      internalAudioRef.current = audio;
-      return audio;
-    }
-    return internalAudioRef.current;
-  }, [externalAudioRef, audioUrl]);
-  
-  // Set audio source only when URL changes
-  useEffect(() => {
-    if (stableAudio && audioUrl && stableAudio.src !== audioUrl) {
-      console.log("Setting audio source to:", audioUrl);
-      stableAudio.src = audioUrl;
-      stableAudio.load();
-    }
-    
-    // Clean up function
-    return () => {
-      if (!externalAudioRef && stableAudio) {
-        stableAudio.pause();
-        if (stableAudio.src && stableAudio.src.startsWith('blob:')) {
-          URL.revokeObjectURL(stableAudio.src);
-        }
-      }
-    };
-  }, [stableAudio, audioUrl, externalAudioRef]);
-  
-  // Update current time state from external time updates
-  useEffect(() => {
-    if (currentTimeInSeconds !== undefined && currentTimeInSeconds !== null) {
-      setCurrentTime(currentTimeInSeconds);
-    }
-  }, [currentTimeInSeconds]);
-  
-  // Handle time updates from the audio element
-  const handleTimeUpdate = useCallback((time: number) => {
-    setCurrentTime(time);
-  }, []);
-  
-  // Handle context menu show with improved event handling
-  const handleShowContextMenu = useCallback((x: number, y: number, hasTimestamp: boolean, timestamp: number | null) => {
-    setContextMenuPosition({ x, y });
-    setContextMenuTimestamp(timestamp);
-    console.log("Context menu opened at:", x, y, "Has timestamp:", hasTimestamp, "Timestamp:", timestamp);
-  }, []);
-  
-  // Handle context menu close
-  const handleCloseContextMenu = useCallback(() => {
-    setContextMenuPosition(null);
-    setContextMenuTimestamp(null);
-  }, []);
-  
-  // Handle play from timestamp context menu action
-  const handlePlayFromTimestamp = useCallback(() => {
-    if (audioRef.current && contextMenuTimestamp !== null) {
-      console.log("Playing from timestamp:", contextMenuTimestamp);
-      
-      // Play from 1 second before the timestamp
-      const targetTime = Math.max(0, contextMenuTimestamp - 1.0);
-      audioRef.current.currentTime = targetTime;
-      
-      audioRef.current.play().catch(err => {
-        console.error("Audio playback error:", err);
-        // We still update UI state since the audio element will 
-        // attempt playback when possible
-      });
-      
-      setIsPlaying(true);
-    }
-    handleCloseContextMenu();
-  }, [audioRef, contextMenuTimestamp, handleCloseContextMenu]);
-  
-  // Handle play 5 seconds earlier action
-  const handlePlayEarlier = useCallback(() => {
-    if (audioRef.current && contextMenuTimestamp !== null) {
-      console.log("Playing from 5s earlier:", contextMenuTimestamp - 5);
-      
-      // Play from 6 seconds before the timestamp (1s lead-in + 5s earlier)
-      const targetTime = Math.max(0, contextMenuTimestamp - 6.0);
-      audioRef.current.currentTime = targetTime;
-      
-      audioRef.current.play().catch(err => {
-        console.error("Audio playback error:", err);
-        // We still update UI state
-      });
-      
-      setIsPlaying(true);
-    }
-    handleCloseContextMenu();
-  }, [audioRef, contextMenuTimestamp, handleCloseContextMenu]);
-  
-  // Handle pause action
-  const handlePause = useCallback(() => {
-    if (audioRef.current) {
-      console.log("Pausing audio");
-      audioRef.current.pause();
-      setIsPlaying(false);
-    }
-    handleCloseContextMenu();
-  }, [audioRef, handleCloseContextMenu]);
   
   return (
     <div className={cn("border rounded-md", className)} ref={editorContainerRef}>
@@ -274,7 +129,7 @@ export function LexicalEditor({
           ListNode, 
           ListItemNode, 
           HeadingNode,
-          TimestampedTextNode,
+          TextNode,
         ],
       }}>
         <div className="flex items-center justify-between px-4 py-2 border-b">
@@ -288,28 +143,17 @@ export function LexicalEditor({
             </div>
           )}
           
-          {/* Context menu for right-click */}
-          <AudioContextMenu
-            position={contextMenuPosition}
-            onClose={handleCloseContextMenu}
-            hasTimestamp={contextMenuTimestamp !== null}
-            isPlaying={isPlaying}
-            onPlayFromHere={handlePlayFromTimestamp}
-            onPlayEarlier={handlePlayEarlier}
-            onPause={handlePause}
-          >
-            <RichTextPlugin
-              contentEditable={
-                <ContentEditable className="min-h-[200px] max-h-[400px] overflow-y-auto p-4 outline-none" />
-              }
-              placeholder={
-                <div className="absolute top-[15px] left-[15px] text-muted-foreground">
-                  Start editing...
-                </div>
-              }
-              ErrorBoundary={LexicalErrorBoundary}
-            />
-          </AudioContextMenu>
+          <RichTextPlugin
+            contentEditable={
+              <ContentEditable className="min-h-[200px] max-h-[400px] overflow-y-auto p-4 outline-none" />
+            }
+            placeholder={
+              <div className="absolute top-[15px] left-[15px] text-muted-foreground">
+                Start editing...
+              </div>
+            }
+            ErrorBoundary={LexicalErrorBoundary}
+          />
         </div>
         <HistoryPlugin />
         <ListPlugin />
@@ -321,16 +165,6 @@ export function LexicalEditor({
           onReady={() => {
             setIsContentReady(true);
           }}
-        />
-        
-        {/* Add our timestamp plugin */}
-        <TimestampPlugin
-          audioRef={audioRef}
-          isPlaying={isPlaying}
-          setIsPlaying={setIsPlaying}
-          currentTime={currentTime}
-          editingMode={true} // Always enable timestamp features regardless of mode
-          onContextMenu={handleShowContextMenu}
         />
         
         <OnChangePlugin
@@ -345,8 +179,6 @@ export function LexicalEditor({
           }}
         />
       </LexicalComposer>
-      
-      {/* No need to render audio element since we're creating it with useMemo */}
     </div>
   );
 }

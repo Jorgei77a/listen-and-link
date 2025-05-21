@@ -3,11 +3,10 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Clock, Copy } from "lucide-react";
+import { Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { LexicalEditor } from "@/components/editor/LexicalEditor";
-import { AudioPlayer } from "@/components/editor/AudioPlayer";
 import { ExportOptions } from "@/components/editor/ExportOptions";
 import { EditorState, LexicalEditor as LexicalEditorType } from "lexical";
 
@@ -16,7 +15,6 @@ interface TranscriptionDisplayProps {
   fileName: string;
   customTitle?: string;
   audioDuration?: number | null;
-  audioUrl?: string;
   segments?: Array<{
     start: number;
     end: number;
@@ -52,45 +50,12 @@ const TranscriptionDisplay = ({
   fileName, 
   customTitle = "", 
   audioDuration = null,
-  audioUrl = "",
   segments = [],
   onReset 
 }: TranscriptionDisplayProps) => {
   const [copied, setCopied] = useState(false);
-  const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [editor, setEditor] = useState<LexicalEditorType | null>(null);
   const [editorReady, setEditorReady] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const audioRef = useRef<HTMLAudioElement>(null);
-  
-  // Create a stable audio element with useMemo
-  const stableAudio = useMemo(() => {
-    if (!audioRef.current && audioUrl) {
-      const audio = new Audio();
-      audioRef.current = audio;
-      return audio;
-    }
-    return audioRef.current;
-  }, [audioUrl]);
-  
-  // Set audio source when URL changes
-  useEffect(() => {
-    if (stableAudio && audioUrl && stableAudio.src !== audioUrl) {
-      console.log("TranscriptionDisplay: Setting audio source to", audioUrl);
-      stableAudio.src = audioUrl;
-      stableAudio.load();
-    }
-    
-    // Clean up function
-    return () => {
-      if (stableAudio) {
-        stableAudio.pause();
-        if (stableAudio.src && stableAudio.src.startsWith('blob:')) {
-          URL.revokeObjectURL(stableAudio.src);
-        }
-      }
-    };
-  }, [stableAudio, audioUrl]);
   
   const displayTitle = customTitle || fileName.split('.')[0];
 
@@ -109,14 +74,6 @@ const TranscriptionDisplay = ({
 
   const handleEditorChange = (editorState: EditorState) => {
     // Handle editor changes if needed
-  };
-
-  const handleTimeUpdate = (time: number) => {
-    setCurrentTime(time);
-  };
-  
-  const handlePlayStateChange = (playing: boolean) => {
-    setIsPlaying(playing);
   };
 
   // Extract statistics from the transcript
@@ -160,40 +117,20 @@ const TranscriptionDisplay = ({
               <Separator orientation="vertical" className="h-4" />
               <div className="flex items-center">
                 <span className="font-medium">Duration:</span>
-                <span className="ml-1 flex items-center">
-                  {formattedDuration}
-                  <Badge variant="secondary" className="ml-1 text-xs h-5 px-1 py-0" title="Duration confirmed by transcription service">
-                    <Clock className="w-3 h-3 mr-1" /> Confirmed
-                  </Badge>
-                </span>
+                <span className="ml-1">{formattedDuration}</span>
               </div>
             </>
           )}
         </div>
 
-        {/* Lexical Editor with audio integration */}
+        {/* Lexical Editor without audio integration */}
         <LexicalEditor 
           initialText={transcript}
           segments={segments}
           className="mb-4"
           onEditorMount={handleEditorMount}
           onEditorChange={handleEditorChange}
-          currentTimeInSeconds={currentTime}
-          audioRef={audioRef}
-          audioUrl={audioUrl}
         />
-        
-        {/* Audio Player */}
-        {audioUrl && (
-          <div className="mt-4">
-            <AudioPlayer 
-              src={audioUrl} 
-              audioRef={audioRef}
-              onTimeUpdate={handleTimeUpdate} 
-              onPlayStateChange={handlePlayStateChange}
-            />
-          </div>
-        )}
         
         <div className="mt-6 text-center">
           <Button onClick={onReset}>Transcribe Another File</Button>
