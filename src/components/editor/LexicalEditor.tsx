@@ -43,6 +43,10 @@ interface LexicalEditorProps {
   currentTimeInSeconds?: number | null;
   audioRef?: React.RefObject<HTMLAudioElement>;
   audioUrl?: string;
+  config?: {
+    leadInOffset?: number;
+    bubbleHideTimeout?: number;
+  };
 }
 
 // This component initializes content after the editor has mounted
@@ -85,8 +89,8 @@ function InitializeContent({
               
               words.forEach((word, idx) => {
                 // Calculate a proportional timestamp for each word
-                // This is a simplification - in reality you'd want more accurate word-level timestamps
-                const wordPosition = idx / wordCount;
+                // This is a more accurate way to distribute timestamps among words
+                const wordPosition = idx / Math.max(wordCount - 1, 1); // Prevent division by zero
                 const wordTimestamp = segment.start + 
                   wordPosition * (segment.end - segment.start);
                 
@@ -96,6 +100,8 @@ function InitializeContent({
                 
                 // Add space between words (except for the last word)
                 if (idx < wordCount - 1) {
+                  // Space should have the timestamp of the word BEFORE it
+                  // This ensures proper behavior when copying/pasting
                   const spaceNode = $createTimestampedTextNode(" ", wordTimestamp);
                   paragraphNode.append(spaceNode);
                 }
@@ -136,7 +142,11 @@ export function LexicalEditor({
   onEditorChange,
   currentTimeInSeconds,
   audioRef: externalAudioRef,
-  audioUrl
+  audioUrl,
+  config = {
+    leadInOffset: 1.0,
+    bubbleHideTimeout: 4000
+  }
 }: LexicalEditorProps) {
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const [isContentReady, setIsContentReady] = useState(false);
@@ -188,6 +198,8 @@ export function LexicalEditor({
         italic: "italic",
         underline: "underline",
         highlight: "bg-yellow-200",
+        timestamped: editingMode ? "data-timestamped" : "",
+        unsynced: editingMode ? "unsynced-text border-dotted border-b border-muted-foreground" : "",
       },
     },
     onError: (error: Error) => {
@@ -206,23 +218,23 @@ export function LexicalEditor({
   const handlePlayFromTimestamp = useCallback((timestamp: number) => {
     if (audioRef.current && timestamp !== null) {
       // Play from 1 second before the timestamp
-      const targetTime = Math.max(0, timestamp - 1.0);
+      const targetTime = Math.max(0, timestamp - config.leadInOffset);
       audioRef.current.currentTime = targetTime;
       audioRef.current.play().catch(err => console.error("Audio playback error:", err));
       setIsPlaying(true);
     }
-  }, [audioRef]);
+  }, [audioRef, config.leadInOffset]);
   
   // Handle play 5 seconds earlier action
   const handlePlayEarlier = useCallback((timestamp: number) => {
     if (audioRef.current && timestamp !== null) {
       // Play from 6 seconds before the timestamp (1s lead-in + 5s earlier)
-      const targetTime = Math.max(0, timestamp - 6.0);
+      const targetTime = Math.max(0, timestamp - (config.leadInOffset + 5.0));
       audioRef.current.currentTime = targetTime;
       audioRef.current.play().catch(err => console.error("Audio playback error:", err));
       setIsPlaying(true);
     }
-  }, [audioRef]);
+  }, [audioRef, config.leadInOffset]);
   
   // Handle pause action
   const handlePause = useCallback(() => {
@@ -290,6 +302,8 @@ export function LexicalEditor({
           isPlaying={isPlaying}
           setIsPlaying={setIsPlaying}
           currentTime={currentTime}
+          leadInOffset={config.leadInOffset}
+          bubbleHideTimeout={config.bubbleHideTimeout}
           editingMode={editingMode}
         />
         
